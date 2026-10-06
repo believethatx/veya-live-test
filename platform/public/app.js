@@ -76,7 +76,8 @@ function connect(firstMessage) {
       if (msg.type === 'ready') { clearTimeout(timeout); settled = true; status(role === 'host' ? 'You’re live' : 'Watching live'); resolve(); }
       if (msg.type === 'chat') {
         const item = document.createElement('li'); const name = document.createElement('span'); name.className = 'chat-name'; name.textContent = msg.name;
-        item.append(name, document.createTextNode(msg.text)); $('chatLog').append(item);
+        const message = document.createElement('span'); message.className = 'chat-message'; message.textContent = msg.text;
+        item.append(name, message); $('chatLog').append(item);
         if ($('chatLog').children.length > 100) $('chatLog').firstChild.remove(); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
       if (msg.type === 'viewers') $('viewerCount').textContent = msg.count;
