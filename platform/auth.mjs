@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS account_tokens (token_hash TEXT PRIMARY KEY, user_id 
 db.exec(`CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY REFERENCES users(id), bio TEXT NOT NULL DEFAULT '', avatar TEXT NOT NULL DEFAULT '', interests TEXT NOT NULL DEFAULT '[]', completed INTEGER NOT NULL DEFAULT 0);`);
 if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name==='country'))db.exec("ALTER TABLE profiles ADD COLUMN country TEXT NOT NULL DEFAULT ''");
 export const INTERESTS = ['Chat', 'Music', 'Gaming', 'Other'];
-const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed,country FROM profiles WHERE user_id=?').get(id); return {bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],country:p?.country || '',onboarded:Boolean(p?.completed && p?.country)}; };
+for(const [name,definition] of [['age','INTEGER'],['hobbies',"TEXT NOT NULL DEFAULT ''"]])if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name===name))db.exec(`ALTER TABLE profiles ADD COLUMN ${name} ${definition}`);
+const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed,country,age,hobbies FROM profiles WHERE user_id=?').get(id); return {age:p?.age ?? null,hobbies:p?.hobbies || '',bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],country:p?.country || '',onboarded:Boolean(p?.completed && p?.country)}; };
 const sessions = db.prepare('SELECT u.id, u.email, u.display_name AS displayName, u.email_verified, u.adult_ack FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?');
 const tokenHash = token => createHash('sha256').update(token).digest('hex');
 const publicUser = row => ({ id: row.id, email: row.email, displayName: row.displayName, emailVerified: Boolean(row.email_verified), adult: Boolean(row.adult_ack), ...profileFor(row.id) });
@@ -90,6 +91,9 @@ export function saveProfile(id, input) {
   if (typeof input.bio !== 'string' || input.bio.length > 160) throw Error('Keep your bio under 160 characters');
   if (!Array.isArray(input.interests) || input.interests.length > 4 || input.interests.some(x => !INTERESTS.includes(x))) throw Error('Choose interests from the list');
   if (!user.adult && input.adult !== true) throw Error('Confirm you are 18 or older');
+  const age=input.age===undefined ? user.age : input.age;const hobbies=input.hobbies===undefined ? user.hobbies : input.hobbies;
+  if(age!==null && (!Number.isInteger(age) || age<18 || age>120))throw Error('Age must be a whole number from 18 to 120, or left blank');
+  if(typeof hobbies!=='string' || hobbies.length>120)throw Error('Keep hobbies under 120 characters');
   const avatar = input.avatar ?? '';
   if (typeof avatar !== 'string' || avatar.length > 150000) throw Error('Choose a smaller profile photo');
   if (avatar) {
@@ -101,7 +105,7 @@ export function saveProfile(id, input) {
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('UPDATE users SET display_name=?,adult_ack=1 WHERE id=?').run(name,id);
-    db.prepare('INSERT INTO profiles (user_id,bio,avatar,interests,completed,country) VALUES (?,?,?,?,1,?) ON CONFLICT(user_id) DO UPDATE SET bio=excluded.bio,avatar=excluded.avatar,interests=excluded.interests,completed=1,country=excluded.country').run(id,input.bio.trim(),avatar,JSON.stringify([...new Set(input.interests)]),input.country);
+    db.prepare('INSERT INTO profiles (user_id,bio,avatar,interests,completed,country,age,hobbies) VALUES (?,?,?,?,1,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bio=excluded.bio,avatar=excluded.avatar,interests=excluded.interests,completed=1,country=excluded.country,age=excluded.age,hobbies=excluded.hobbies').run(id,input.bio.trim(),avatar,JSON.stringify([...new Set(input.interests)]),input.country,age,hobbies.trim());
     db.exec('COMMIT');
   } catch(e) {db.exec('ROLLBACK');throw e;}
   return userById(id);
