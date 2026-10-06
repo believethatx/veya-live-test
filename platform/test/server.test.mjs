@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 const directory = mkdtempSync(join(tmpdir(), 'veya-server-')); process.env.DATA_FILE = join(directory, 'test.sqlite');
 const { createApp } = await import('../server.mjs');
+const {manage}=await import('../access.mjs');
 const { POLICY_VERSION } = await import('../safety.mjs');
 const next = (socket, type) => new Promise((resolve, reject) => {
   const timer = setTimeout(() => { socket.off('message', listener); reject(Error(`Missing ${type}`)); }, 5000);
@@ -23,7 +24,7 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   }
   async function account(name) {
     const response = await request('/api/register', '', { email: `${name}@example.test`, displayName: name, password: 'a long unique password', adult: true });
-    assert.equal(response.status, 200); return { cookie: response.headers.get('set-cookie').split(';')[0], user: (await response.json()).user };
+    assert.equal(response.status, 200); const cookie=response.headers.get('set-cookie').split(';')[0];const user=(await response.json()).user;await request('/api/profile',cookie,{displayName:name,country:'GB',bio:'',avatar:'',interests:[],adult:true});return {cookie,user};
   }
   async function connect(account) {
     const socket = new WebSocket(`${base.replace('http', 'ws')}/signal`, { headers: { Origin: base, Cookie: account.cookie } }); sockets.push(socket);
@@ -32,7 +33,7 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   assert.equal((await request('/api/rooms')).status, 401);
   const owner = await account('Owner'), a = await account('ViewerA'), b = await account('ViewerB');
   assert.equal((await request('/api/admin/reports', a.cookie)).status, 403);
-  process.env.ADMIN_USER_IDS = owner.user.id;
+  process.env.ADMIN_USER_IDS = owner.user.id;manage(owner.user,{action:'tester',userId:a.user.id,approved:true});manage(owner.user,{action:'tester',userId:b.user.id,approved:true});
   const host = await connect(owner);
   assert.match((await exchange(host, { type: 'create', title: 'A real live room', category: 'Chat' }, 'error')).message, /Accept/);
   const consent = { acceptRules: true, policyVersion: POLICY_VERSION };

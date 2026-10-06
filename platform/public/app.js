@@ -17,6 +17,8 @@ function paintAvatar(element, name, avatar = '') {
   else element.textContent = (name || 'V').trim().slice(0,1).toUpperCase();
 }
 function navigate(destination, force = false) {
+  if(currentUser && !force && !currentUser.access?.accessAllowed && destination!=='onboarding')destination='profile';
+  if(destination==='studio' && !currentUser.access?.canHost){destination='profile';}
   if (!force && (busy || activeRoom)) {notice('Leave your live room first.');return;}
   for (const id of ['discover','profile','studio','onboarding','admin']) $(id).hidden = id !== destination;
   $('appNav').hidden = destination === 'onboarding';
@@ -24,7 +26,7 @@ function navigate(destination, force = false) {
     if (target === destination) $(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
   }
   if(destination === 'discover') void refreshRooms();
-  if(destination === 'profile') renderProfile();
+  if(destination === 'profile') {renderProfile();void loadOwnAccess();}
   notice('');window.scrollTo(0,0);
 }
 function renderRooms() {
@@ -60,12 +62,14 @@ async function refreshRooms() {
   catch(error){$('rooms').textContent=error.message;}
 }
 function renderProfile() {
+  $('accountId').textContent=currentUser.id;renderAccess();
   paintAvatar($('profileAvatar'),currentUser.displayName,currentUser.avatar);
   $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || 'A little mystery is fine. Add a bio whenever you like.';
   $('profileInterests').replaceChildren();for(const interest of currentUser.interests || []){const tag=document.createElement('span');tag.className='tag';tag.textContent=interest;$('profileInterests').append(tag);}
 }
 function setProfileStep(step) {
   profileStep=step;$('profileStepOne').hidden=step!==1;$('profileStepTwo').hidden=step!==2;
+  $('profileCountry').required=step===1;$('profileCountry').disabled=step!==1;
   $('profileName').required=step===1;$('profileName').disabled=step!==1;
   $('profileBack').hidden=step===1;$('cancelProfile').hidden=!editingProfile;
   $('onboardingProgress').textContent=`${editingProfile ? 'Your profile' : 'Make yourself at home'} · ${step} of 2`;
@@ -74,7 +78,7 @@ function setProfileStep(step) {
   $('profileNext').textContent=step===1 ? 'Continue' : editingProfile ? 'Save profile' : 'Enter Veya';$('profileError').textContent='';
 }
 function openProfileSetup(editing=false) {
-  editingProfile=editing;draftAvatar=currentUser.avatar || '';$('profileName').value=currentUser.displayName;$('profileBio').value=currentUser.bio || '';
+  editingProfile=editing;$('profileCountry').value=currentUser.country || '';draftAvatar=currentUser.avatar || '';$('profileName').value=currentUser.displayName;$('profileBio').value=currentUser.bio || '';
   $('onboardingAdult').checked=currentUser.adult;$('onboardingAdultLabel').hidden=currentUser.adult;paintAvatar($('avatarPreview'),currentUser.displayName,draftAvatar);
   $('interestChoices').replaceChildren();for(const interest of interests){const label=document.createElement('label');label.className='interest-choice';const input=document.createElement('input');input.type='checkbox';input.value=interest;input.checked=currentUser.interests?.includes(interest);label.append(input,document.createTextNode(interest));$('interestChoices').append(label);}
   setProfileStep(1);navigate('onboarding');
@@ -95,7 +99,7 @@ $('profileForm').onsubmit=async event=>{
   event.preventDefault();$('profileError').textContent='';
   if(profileStep===1){if(!currentUser.adult && !$('onboardingAdult').checked){$('profileError').textContent='Confirm you are 18 or older to continue.';return;}setProfileStep(2);return;}
   $('profileNext').disabled=true;
-  try{const {user}=await api('/api/profile',{displayName:$('profileName').value,bio:$('profileBio').value,avatar:draftAvatar,interests:[...$('interestChoices').querySelectorAll('input:checked')].map(x=>x.value),adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
+  try{const {user}=await api('/api/profile',{displayName:$('profileName').value,country:$('profileCountry').value,bio:$('profileBio').value,avatar:draftAvatar,interests:[...$('interestChoices').querySelectorAll('input:checked')].map(x=>x.value),adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
   catch(e){$('profileError').textContent=e.message;}finally{$('profileNext').disabled=false;}
 };
 $('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('emptyGoLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
@@ -185,6 +189,7 @@ $('start').onclick = async () => {
   if (busy) return; notice('');
   if (!$('hostRules').checked) { notice('Accept the room privacy rules before going live.'); return; }
   if (!config.mediaConfigured) { notice('Live video setup is still pending.'); return; }
+  if(!currentUser.access?.accessAllowed || !currentUser.access?.canHost){navigate('profile');notice('Streaming requires host approval.');return;}
   busy = true; $('start').disabled = true; role = 'host';
   try {
     if ($('title').value.trim().length < 3) throw Error('Enter a room title of at least 3 characters.');
@@ -222,7 +227,7 @@ let linkedRoom = new URLSearchParams(location.search).get('room');
 async function showSignedIn(user) {
   currentUser=user;updateAccount(user);$('account').hidden=true;$('who').textContent=user.displayName;$('openAdmin').hidden=!user.admin;
   if(!user.onboarded){openProfileSetup();return;}
-  navigate('discover');await refreshRooms();
+  navigate(user.access?.accessAllowed ? 'discover' : 'profile');await refreshRooms();
   if(linkedRoom && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)){const invitation=linkedRoom;linkedRoom=null;requestJoin(invitation);}
 }
 $('accountForm').onsubmit = async event => {
@@ -250,7 +255,7 @@ async function loadReports() {
     actions.append(end, review); item.append(heading, description, details, actions); $('reports').append(item);
   }
 }
-$('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave your room before opening moderation.'); return; } try { await loadReports(); navigate('admin'); } catch (error) { notice(error.message); } };
+$('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave your room before opening moderation.'); return; } try { await loadManagement(); navigate('admin'); } catch (error) { notice(error.message); } };
 $('closeAdmin').onclick = () => navigate('discover');
 $('videoStage').oncontextmenu = event => event.preventDefault();
 window.addEventListener('pagehide', cleanup);
@@ -263,7 +268,8 @@ function updateAccount(user) {
   $('emailStatus').textContent = user.emailVerified ? 'Email verified' : config.accounts?.email ? 'Verify your email before joining or hosting lives.' : 'Email delivery setup is pending.';
   $('sendVerification').hidden = Boolean(user.emailVerified || !config.accounts?.email);
   $('adultConfirm').hidden = Boolean(user.adult); $('confirmAdult').hidden = Boolean(user.adult);
-  $('start').disabled = !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
+  $('navLive').textContent=user.access?.canHost ? '+ Go live' : 'Become a host';
+  $('start').disabled = !user.access?.canHost || !user.access?.accessAllowed || !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
   if (config.accounts?.email && !user.emailVerified) $('emailStatus').closest('details').open = true;
 }
 for (const button of document.querySelectorAll('[data-provider]')) button.onclick = () => { location.href = `/auth/${button.dataset.provider}`; };
@@ -274,6 +280,7 @@ $('recoveryForm').onsubmit = async event => {event.preventDefault();const button
 
 try {
   config = await api('/api/config');
+  for(const country of config.countries || []){const option=document.createElement('option');option.value=country.code;option.textContent=country.name;$('profileCountry').append(option);}
   for (const button of document.querySelectorAll('[data-provider]')) button.hidden = !config.accounts?.[button.dataset.provider];
   $('socialSignIn').hidden = !config.accounts?.google && !config.accounts?.facebook;
   $('forgotPassword').hidden = !config.accounts?.email;
@@ -288,3 +295,40 @@ try {
   else if (accountLink.has('passwordReset')) {history.replaceState(null,'','/');notice('Password updated. Sign in with your new password.');}
   if (!$('recovery').hidden) {} else { const {user}=await api('/api/me'); if(user) await showSignedIn(user); }
 } catch(e) {notice(e.message || 'Could not reach Veya. Try again shortly.');}
+
+function renderAccess(){
+ const a=currentUser.access || {};$('accessStatus').textContent=a.blocked ? `Access suspended: ${a.blockReason}` : a.accessAllowed ? 'Tester access approved. You can watch and chat.' : 'Tester access is waiting for admin approval. Share your account ID with the admin.';
+ $('applyHost').hidden=!a.accessAllowed || a.canHost || a.applicationPending || a.blocked;
+ $('trialStatus').textContent=a.hostStatus==='trial' ? `Trial host · ends ${new Date(a.trialEnd).toLocaleDateString()}` : a.applicationPending ? 'Host application received. An admin will review it.' : a.hostStatus==='review' ? 'Your trial has ended. Host access is awaiting review.' : a.canHost ? 'Host access approved.' : 'Viewer account. Streaming needs separate approval.';$('trialStatus').textContent+=` · ${a.liveHours || 0} tracked live hours`;
+ $('accountPhone').value=a.phone || '';
+}
+async function loadOwnAccess(){if(!currentUser)return;try{const result=await api('/api/access');currentUser.access=result.access;updateAccount(currentUser);renderAccess();$('myAppeals').replaceChildren();for(const appeal of result.appeals){const item=document.createElement('p');item.textContent=`${appeal.status}: ${appeal.message}${appeal.response ? ' · Admin: '+appeal.response : ''}`;$('myAppeals').append(item);}}catch(e){notice(e.message);}}
+$('applyHost').onclick=()=>{$('hostBio').value=currentUser.bio || '';$('hostApplyDialog').showModal();};$('cancelHostApply').onclick=()=>$('hostApplyDialog').close();
+$('hostApplicationForm').onsubmit=async e=>{e.preventDefault();try{const result=await api('/api/host/apply',{bio:$('hostBio').value,languages:$('hostLanguages').value,experience:$('hostExperience').value,socialLinks:$('hostLinks').value,contact:$('hostContact').value});currentUser=result.user;$('hostApplyDialog').close();renderAccess();notice('Application received.');}catch(e){notice(e.message);}};
+$('phoneForm').onsubmit=async e=>{e.preventDefault();try{currentUser=(await api('/api/access/phone',{phone:$('accountPhone').value})).user;renderAccess();notice('Phone number saved.');}catch(e){notice(e.message);}};
+$('appealForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/access/appeal',{message:$('appealMessage').value});$('appealMessage').value='';await loadOwnAccess();notice('Appeal received.');}catch(e){notice(e.message);}};
+let managementData;
+const textElement=(tag,text)=>{const e=document.createElement(tag);e.textContent=text;return e;};
+function actionButton(label,action){const b=textElement('button',label);b.className='btn quiet';b.type='button';b.onclick=action;return b;}
+async function adminAction(input){try{await api('/api/admin/manage',input);await loadManagement();notice('Saved.');}catch(e){notice(e.message);}}
+function renderMembers(){
+ $('members').replaceChildren();const q=$('memberSearch').value.toLowerCase();
+ for(const m of managementData.members.filter(m=>`${m.name} ${m.email}`.toLowerCase().includes(q))){
+ const card=document.createElement('div');card.className='admin-member';card.append(textElement('h2',m.name),textElement('p',`${m.email} · ${m.country || 'Country pending'} · ${m.id}`),textElement('p',`Tester: ${m.tester ? 'approved':'pending'} · Host: ${m.host_status || 'viewer'}`));
+ if(m.application){let application;try{application=JSON.parse(m.application);}catch{application={};}card.append(textElement('pre',Object.entries(application).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join('\n')));}
+ if(managementData.permissions.includes('testers'))card.append(actionButton(m.tester?'Remove tester access':'Approve tester',()=>adminAction({action:'tester',userId:m.id,approved:!m.tester})));
+ if(managementData.permissions.includes('hosts')){const row=document.createElement('div');row.className='row wrap';const select=document.createElement('select');select.setAttribute('aria-label','Host decision for '+m.name);for(const [v,label] of [['trial','Start / extend trial'],['approved','Approve after trial'],['viewer','Revoke host access'],['rejected','Reject application']]){const o=textElement('option',label);o.value=v;select.append(o);}const days=document.createElement('input');days.type='number';days.min=1;days.max=365;days.value=managementData.settings?.trialDays || 15;days.setAttribute('aria-label','Trial days for '+m.name);row.append(select,days,actionButton('Save host decision',()=>adminAction({action:'host',userId:m.id,status:select.value,days:Number(days.value)})));card.append(row);}
+ if(managementData.permissions.includes('moderation')){card.append(textElement('p',`Last IP: ${m.last_ip || 'Unavailable'} · Phone: ${m.phone || 'Not supplied'} (unverified)`));const row=document.createElement('div');row.className='row wrap';const kind=document.createElement('select');kind.setAttribute('aria-label','Suspension type');for(const x of ['account','phone','ip']){const o=textElement('option',x);o.value=x;kind.append(o);}const days=document.createElement('input');days.type='number';days.min=0;days.max=365;days.value=0;days.setAttribute('aria-label','Suspension days, zero is permanent');const reason=document.createElement('input');reason.placeholder='Suspension reason';reason.maxLength=500;reason.setAttribute('aria-label','Suspension reason');row.append(kind,days,reason,actionButton('Suspend',()=>adminAction({action:'block',userId:m.id,kind:kind.value,days:Number(days.value),reason:reason.value})));card.append(row);}
+ if(managementData.owner){const box=document.createElement('div');for(const permission of ['testers','hosts','moderation','settings','appeals']){const label=document.createElement('label');label.className='permission-check';const input=document.createElement('input');input.type='checkbox';input.value=permission;input.checked=m.permissions?.includes(permission);label.append(input,document.createTextNode(permission));box.append(label);}box.append(actionButton('Save admin permissions',()=>adminAction({action:'permissions',userId:m.id,permissions:[...box.querySelectorAll('input:checked')].map(x=>x.value)})));card.append(box);}
+ $('members').append(card);
+ }
+}
+async function loadManagement(){
+ managementData=await api('/api/admin/management');$('management').hidden=false;$('reports').hidden=true;$('adminReportsTab').hidden=!managementData.permissions.includes('moderation');renderMembers();$('trialSettings').replaceChildren();
+ if(managementData.settings){const s=managementData.settings;const form=document.createElement('form');form.className='card';form.append(textElement('h2','Trial and access settings'),textElement('p','Trial length changes apply to new or extended trials. The outcome rule applies when a trial expires. Payment values are planning settings; purchases and payouts are not active.'));const grid=document.createElement('div');grid.className='settings-grid';const inputs={};for(const [field,label] of [['trialDays','Trial length (days)'],['minimumHours','Required hours per period'],['minimumDays','Required streaming days'],['dailyHourCap','Daily qualifying hour cap (0 = none)'],['trialAmount','Planned trial payment amount']]){const wrap=document.createElement('div');const labelNode=textElement('label',label);const input=document.createElement('input');input.type='number';input.min=field==='trialDays'?1:0;input.step=field==='trialDays'||field==='minimumDays'?1:.25;input.value=s[field];input.setAttribute('aria-label',label);inputs[field]=input;wrap.append(labelNode,input);grid.append(wrap);}form.append(grid);
+ for(const [field,label] of [['testingApproval','Require admin approval for tester access'],['paidTrial','Mark trials as part of the planned paid programme']]){const wrap=document.createElement('label');wrap.className='check';const input=document.createElement('input');input.type='checkbox';input.checked=s[field];inputs[field]=input;wrap.append(input,document.createTextNode(label));form.append(wrap);}
+ const outcome=document.createElement('select');outcome.setAttribute('aria-label','After trial expires');for(const [value,label] of [['review','Pause hosting until reviewed'],['continue','Automatically approve continued hosting']]){const option=textElement('option',label);option.value=value;outcome.append(option);}outcome.value=s.trialOutcome;form.append(textElement('label','After trial expires'),outcome);const submit=textElement('button','Save settings');submit.className='btn wide';form.append(submit);form.onsubmit=e=>{e.preventDefault();const input={action:'settings',trialOutcome:outcome.value};for(const [key,el] of Object.entries(inputs))input[key]=el.type==='checkbox'?el.checked:Number(el.value);void adminAction(input);};$('trialSettings').append(form);}
+ $('blocks').replaceChildren();if(managementData.blocks.length)$('blocks').append(textElement('h2','Active suspensions'));for(const b of managementData.blocks){const card=document.createElement('div');card.className='admin-member';card.append(textElement('p',`${b.kind}: ${b.value} · ${b.reason} · ${b.expires_at?new Date(b.expires_at).toLocaleString():'Permanent'}`),actionButton('Lift suspension',()=>adminAction({action:'unblock',blockId:b.id})));$('blocks').append(card);}
+ $('adminAppeals').replaceChildren();if(managementData.appeals.length)$('adminAppeals').append(textElement('h2','Appeals'));for(const a of managementData.appeals){const card=document.createElement('div');card.className='admin-member';const response=document.createElement('textarea');response.value=a.response;response.maxLength=1000;response.setAttribute('aria-label','Reply to appeal');card.append(textElement('h2',a.name),textElement('p',`${a.status}: ${a.message}`),response,actionButton('Reply and mark reviewed',()=>adminAction({action:'appeal',appealId:a.id,status:'reviewed',response:response.value})));$('adminAppeals').append(card);}
+}
+$('memberSearch').oninput=()=>{if(managementData)renderMembers();};$('adminAccessTab').onclick=()=>loadManagement().catch(e=>notice(e.message));$('adminReportsTab').onclick=async()=>{try{await loadReports();$('management').hidden=true;$('reports').hidden=false;}catch(e){notice(e.message);}};

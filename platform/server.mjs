@@ -1,3 +1,5 @@
+import {COUNTRIES} from './countries.mjs';
+import {accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +31,7 @@ export function createApp({ media = createMedia() } = {}) {
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
-  const publicUser = user => user && ({ ...user, admin: isAdmin(user) });
+  const publicUser = (user,req) => user && ({ ...user, admin: isAdmin(user), access:accessFor(user,req) });
   const securityHeaders = {
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY', 'Cache-Control': 'no-store',
@@ -54,13 +56,14 @@ export function createApp({ media = createMedia() } = {}) {
     for (const socket of rooms.participants(room)) send(socket, { type: 'viewers', count: viewers.length });
   }
   async function endRoom(room, message = 'The host ended this room.') {
-    rooms.leave(room.host);
+    endHours(room);rooms.leave(room.host);
     for (const peer of rooms.participants(room)) { send(peer, { type: 'ended', message }); peer.close(1000, 'Room ended'); }
     try { await media.end(room); } catch { console.error('Media room cleanup failed'); }
   }
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, requestOrigin(req));
+      expireTrials();const sessionUser=userFromRequest(req);rememberConnection(sessionUser,req);
       const authMatch = url.pathname.match(/^\/auth\/(google|facebook)(\/callback)?$/);
       if (req.method === 'GET' && authMatch) {
         const provider = authMatch[1];
@@ -81,17 +84,20 @@ export function createApp({ media = createMedia() } = {}) {
         }
       }
       if (req.url === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true, mediaConfigured: media.configured }); return; }
-      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION, accounts: accountConfig() }); return; }
-      if (req.url === '/api/me' && req.method === 'GET') { json(res, 200, { user: publicUser(userFromRequest(req)) }); return; }
+      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION, accounts: accountConfig(), countries:COUNTRIES }); return; }
+      if (req.url === '/api/me' && req.method === 'GET') { json(res, 200, { user: publicUser(userFromRequest(req),req) }); return; }
       if (req.url === '/api/rooms' && req.method === 'GET') {
         if (!userFromRequest(req)) { json(res, 401, { error: 'Sign in first' }); return; }
+        try{assertAccess(userFromRequest(req),req);}catch(e){json(res,403,{error:e.message});return;}
         json(res, 200, { rooms: rooms.list() }); return;
       }
       if (req.url === '/api/admin/reports' && req.method === 'GET') {
         const user = userFromRequest(req);
-        if (!isAdmin(user)) { json(res, 403, { error: 'Admin access required' }); return; }
+        if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
+      if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
+      if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}json(res,200,management(sessionUser));return;}
       if (req.url === '/api/livekit/webhook' && req.method === 'POST') {
         try {
           const event = await media.webhook(await body(req, 65536), req.headers.authorization);
@@ -117,15 +123,24 @@ export function createApp({ media = createMedia() } = {}) {
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');
           json(res, 200, { ok: true }, { 'Set-Cookie': expiredCookie }); return;
         }
+        if(['/api/host/apply','/api/access/phone','/api/access/appeal','/api/admin/manage'].includes(req.url)){
+          const user=userFromRequest(req);if(!user){json(res,401,{error:'Sign in first'});return;}const input=await jsonBody(req);
+          if(req.url==='/api/admin/manage'){if(!isAdmin(user)){json(res,403,{error:'Admin access required'});return;}manage(user,input);
+            for(const socket of wss.clients){try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');}}
+          }else if(req.url==='/api/host/apply'){assertAccess(user,req);applyHost(user,input);}
+          else if(req.url==='/api/access/phone'){if(accessFor(user,req).blocked)throw Error('Phone changes are unavailable during a suspension');savePhone(user,input.phone);}
+          else appeal(user,input.message);
+          json(res,200,{user:publicUser(user,req)});return;
+        }
         if (req.url === '/api/profile') {
           const user = userFromRequest(req); if (!user) {json(res,401,{error:'Sign in first'});return;}
           if ([...wss.clients].some(s => s.user.id === user.id && rooms.peer(s))) throw Error('Leave your live room before editing your profile');
           const updated = saveProfile(user.id, await jsonBody(req, 160000));
-          json(res,200,{user:publicUser(updated)});return;
+          json(res,200,{user:publicUser(updated,req)});return;
         }
         if (req.url?.startsWith('/api/admin/')) {
           const user = userFromRequest(req);
-          if (!isAdmin(user)) { json(res, 403, { error: 'Admin access required' }); return; }
+          if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
           const input = await jsonBody(req);
           if (req.url === '/api/admin/end-room') {
             const room = rooms.rooms.get(String(input.roomId));
@@ -136,14 +151,14 @@ export function createApp({ media = createMedia() } = {}) {
           json(res, 404, { error: 'Not found' }); return;
         }
         if (!['/api/register', '/api/login', '/api/account/adult', '/api/account/send-verification', '/api/account/forgot-password', '/api/account/verify', '/api/account/reset-password'].includes(req.url)) { json(res, 404, { error: 'Not found' }); return; }
-        const ip = req.socket.remoteAddress || 'unknown';
+        const ip = clientIP(req) || req.socket.remoteAddress || 'unknown';
         const history = (attempts.get(ip) || []).filter(time => Date.now() - time < 60_000);
         if (history.length >= 8) { json(res, 429, { error: 'Too many attempts. Wait a minute.' }); return; }
         history.push(Date.now()); attempts.set(ip, history);
         const input = await jsonBody(req);
         if (req.url === '/api/account/adult') {
           const user = userFromRequest(req); if (!user || input.adult !== true) throw Error('Confirm you are 18 or older');
-          json(res,200,{user:publicUser(confirmAdult(user.id))});return;
+          json(res,200,{user:publicUser(confirmAdult(user.id),req)});return;
         }
         if (req.url === '/api/account/send-verification' || req.url === '/api/account/forgot-password') {
           if (!accountConfig().email) throw Error('Email delivery is not connected yet');
@@ -162,7 +177,7 @@ export function createApp({ media = createMedia() } = {}) {
         }
         const user = req.url === '/api/register' ? register(input) : login(input);
         if (req.url === '/api/register' && accountConfig().email) await deliverLink(user.email,'verify',requestOrigin(req));
-        json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(createSession(user.id), secureRequest(req)) }); return;
+        json(res, 200, { user: publicUser(user,req) }, { 'Set-Cookie': sessionCookie(createSession(user.id), secureRequest(req)) }); return;
       }
       const path = req.url?.split('?')[0];
       if (req.method !== 'GET' || !files[path]) { res.writeHead(404, securityHeaders); res.end('Not found'); return; }
@@ -173,7 +188,8 @@ export function createApp({ media = createMedia() } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   server.on('upgrade', (req, socket, head) => {
     const user = userFromRequest(req);
-    if (user && (!user.adult || (accountConfig().email && !user.emailVerified))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+    try{assertAccess(user,req);}catch{socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');socket.destroy();return;}
+    if (user && (!user.country || !user.onboarded || !user.adult || (accountConfig().email && !user.emailVerified))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     if (req.url !== '/signal' || req.headers.origin !== requestOrigin(req) || !user) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => { ws.user = user; ws.request = req; wss.emit('connection', ws); });
   });
@@ -188,6 +204,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (socket.readyState !== WebSocket.OPEN) return;
         if (!userFromRequest(socket.request)) { socket.close(1008, 'Sign in again'); return; }
         const msg = JSON.parse(raw);
+        expireTrials();assertAccess(socket.user,socket.request,msg.type==='create' || rooms.peer(socket)?.role==='host');
         if (msg.type === 'create' || msg.type === 'join') {
           if (!media.configured) throw Error('Live video is not connected yet');
           if (msg.policyVersion !== POLICY_VERSION || msg.acceptRules !== true) throw Error('Accept the room privacy rules first');
@@ -204,7 +221,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (msg.type === 'ready') {
           await media.verify(entry.room, socket.user, entry.role);
           if (!rooms.peer(socket) || socket.readyState !== WebSocket.OPEN) return;
-          rooms.ready(socket); send(socket, { type: 'ready' }); roster(entry.room); return;
+          rooms.ready(socket);if(entry.role==='host')startHours(entry.room,socket.user); send(socket, { type: 'ready' }); roster(entry.room); return;
         }
         if (msg.type === 'chat') {
           if (!entry.ready) throw Error('Connect to the live room first');
@@ -235,7 +252,10 @@ export function createApp({ media = createMedia() } = {}) {
     socket.on('error', () => socket.terminate());
   });
   const heartbeat = setInterval(() => {
+    expireTrials();
     for (const socket of wss.clients) {
+      try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');continue;}
+      if(rooms.peer(socket)?.role==='host')touchHours(rooms.peer(socket).room);
       if (!socket.alive || !userFromRequest(socket.request)) { socket.terminate(); continue; }
       socket.alive = false; socket.ping();
     }

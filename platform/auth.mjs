@@ -1,3 +1,4 @@
+import {COUNTRY_CODES} from './countries.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -19,8 +20,9 @@ if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'email_ve
 db.exec(`CREATE TABLE IF NOT EXISTS identities (provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(provider,subject));
 CREATE TABLE IF NOT EXISTS account_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, purpose TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
 db.exec(`CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY REFERENCES users(id), bio TEXT NOT NULL DEFAULT '', avatar TEXT NOT NULL DEFAULT '', interests TEXT NOT NULL DEFAULT '[]', completed INTEGER NOT NULL DEFAULT 0);`);
+if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name==='country'))db.exec("ALTER TABLE profiles ADD COLUMN country TEXT NOT NULL DEFAULT ''");
 export const INTERESTS = ['Chat', 'Music', 'Gaming', 'Other'];
-const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed FROM profiles WHERE user_id=?').get(id); return {bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],onboarded:Boolean(p?.completed)}; };
+const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed,country FROM profiles WHERE user_id=?').get(id); return {bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],country:p?.country || '',onboarded:Boolean(p?.completed && p?.country)}; };
 const sessions = db.prepare('SELECT u.id, u.email, u.display_name AS displayName, u.email_verified, u.adult_ack FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?');
 const tokenHash = token => createHash('sha256').update(token).digest('hex');
 const publicUser = row => ({ id: row.id, email: row.email, displayName: row.displayName, emailVerified: Boolean(row.email_verified), adult: Boolean(row.adult_ack), ...profileFor(row.id) });
@@ -82,6 +84,7 @@ const userById = id => { const row = db.prepare('SELECT id,email,display_name AS
 export function confirmAdult(id) { db.prepare('UPDATE users SET adult_ack=1 WHERE id=?').run(id); return userById(id); }
 export function saveProfile(id, input) {
   const user = userById(id); if (!user) throw Error('Sign in first');
+  if(!COUNTRY_CODES.has(input.country))throw Error('Select your country');
   const name = typeof input.displayName === 'string' ? input.displayName.trim() : '';
   if (name.length < 2 || name.length > 40) throw Error('Display name must be 2 to 40 characters');
   if (typeof input.bio !== 'string' || input.bio.length > 160) throw Error('Keep your bio under 160 characters');
@@ -98,7 +101,7 @@ export function saveProfile(id, input) {
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('UPDATE users SET display_name=?,adult_ack=1 WHERE id=?').run(name,id);
-    db.prepare('INSERT INTO profiles (user_id,bio,avatar,interests,completed) VALUES (?,?,?,?,1) ON CONFLICT(user_id) DO UPDATE SET bio=excluded.bio,avatar=excluded.avatar,interests=excluded.interests,completed=1').run(id,input.bio.trim(),avatar,JSON.stringify([...new Set(input.interests)]));
+    db.prepare('INSERT INTO profiles (user_id,bio,avatar,interests,completed,country) VALUES (?,?,?,?,1,?) ON CONFLICT(user_id) DO UPDATE SET bio=excluded.bio,avatar=excluded.avatar,interests=excluded.interests,completed=1,country=excluded.country').run(id,input.bio.trim(),avatar,JSON.stringify([...new Set(input.interests)]),input.country);
     db.exec('COMMIT');
   } catch(e) {db.exec('ROLLBACK');throw e;}
   return userById(id);

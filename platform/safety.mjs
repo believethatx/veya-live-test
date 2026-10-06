@@ -1,3 +1,4 @@
+import {permissionsFor,hasPermission} from './access.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
@@ -12,7 +13,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS reports (
   host_id TEXT NOT NULL, host_name TEXT NOT NULL, room_title TEXT NOT NULL,
   reason TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open'
 );`);
-export const isAdmin = user => Boolean(user && String(process.env.ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean).includes(user.id));
+export const isAdmin = user => permissionsFor(user).length > 0;
 export function reportRoom(user, room, reason, details) {
   if (!reasons.has(reason)) throw Error('Choose a report reason');
   details = String(details ?? '').trim().slice(0, 1000);
@@ -22,10 +23,10 @@ export function reportRoom(user, room, reason, details) {
   return id;
 }
 export function listReports(user) {
-  if (!isAdmin(user)) throw Error('Admin access required');
+  if (!hasPermission(user,'moderation')) throw Error('Admin access required');
   return db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT 200').all();
 }
 export function resolveReport(user, id) {
-  if (!isAdmin(user)) throw Error('Admin access required');
+  if (!hasPermission(user,'moderation')) throw Error('Admin access required');
   return db.prepare("UPDATE reports SET status='reviewed' WHERE id=?").run(String(id)).changes;
 }

@@ -9,7 +9,7 @@ const {createApp}=await import('../server.mjs');
 test('profile completion persists in sessions and validates age, interests and photo content',()=>{
  const user=auth.socialAccount('google','profile-google',{email:'profile@example.test',name:'Profile',email_verified:true});
  const req={headers:{cookie:`veya_session=${auth.createSession(user.id)}`}};
- const input={displayName:'Updated name',bio:'Music and games',interests:['Music','Music'],avatar:'',adult:true};
+ const input={displayName:'Updated name',bio:'Music and games',interests:['Music','Music'],avatar:'',adult:true,country:'GB'};
  assert.equal(auth.userFromRequest(req).onboarded,false);
  assert.throws(()=>auth.saveProfile(user.id,{...input,adult:false}),/18 or older/);
  assert.throws(()=>auth.saveProfile(user.id,{...input,interests:['invalid']}),/interests/);
@@ -25,7 +25,7 @@ test('profile API requires session and origin, edits only the current account',a
  const user=auth.register({email:'http-profile@example.test',displayName:'Before',password:'long profile password',adult:true});
  const other=auth.register({email:'other-profile@example.test',displayName:'Other',password:'long other password',adult:true});
  const cookie=`veya_session=${auth.createSession(user.id)}`;
- const data={userId:other.id,displayName:'After',bio:'About me',interests:['Gaming'],avatar:'',adult:true};
+ const data={userId:other.id,displayName:'After',bio:'About me',interests:['Gaming'],avatar:'',adult:true,country:'GB'};
  const post=headers=>fetch(`${base}/api/profile`,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(data)});
  try{
   assert.equal((await post({Origin:base})).status,401);
