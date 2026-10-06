@@ -1,6 +1,8 @@
 import { Room, RoomEvent, Track, createLocalTracks } from '/livekit.js';
 const $ = id => document.getElementById(id);
 let socket, liveRoom, localTracks = [], activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
+let managementData, previewTracks=[], previewGeneration=0, notificationItems=[];
+function textElement(tag,text){const e=document.createElement(tag);e.textContent=text;return e;}
 let config = { mediaConfigured: false, policyVersion: '' };
 const status = text => { $('status').textContent = text; };
 const notice = text => { $('notice').textContent = text; };
@@ -10,7 +12,7 @@ async function api(path, input) {
   const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
 }
 const interests = ['Chat', 'Music', 'Gaming', 'Other'];
-let allRooms = [], selectedCategory = 'All', profileStep = 1, draftAvatar = '', editingProfile = false;
+let allRooms = [], selectedCategory = 'All', draftAvatar = '', editingProfile = false;
 function paintAvatar(element, name, avatar = '') {
   element.replaceChildren();
   if (avatar) {const img = document.createElement('img');img.src = avatar;img.alt = '';element.append(img);}
@@ -20,27 +22,30 @@ function navigate(destination, force = false) {
   if(currentUser && !force && !currentUser.access?.accessAllowed && !currentUser.admin && destination!=='onboarding')destination='profile';
   if(destination==='studio' && !currentUser.access?.canHost){destination='profile';}
   if (!force && (busy || activeRoom)) {notice('Leave your live room first.');return;}
-  for (const id of ['discover','profile','studio','onboarding','admin']) $(id).hidden = id !== destination;
+  for (const id of ['discover','profile','studio','onboarding','admin','following','updates','hostHub']) $(id).hidden = id !== destination;
   $('appNav').hidden = destination === 'onboarding';
-  for (const [id,target] of [['navHome','discover'],['navProfile','profile'],['navLive','studio']]) {
+  for (const [id,target] of [['navHome','discover'],['navProfile','profile'],['navLive','studio'],['navFollowing','following'],['navUpdates','updates'],['navHost','hostHub']]) {
     if (target === destination) $(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
   }
   if(destination === 'discover') void refreshRooms();
   if(destination === 'profile') {renderProfile();void loadOwnAccess();}
+  if(destination==='following')void loadPeople(true);
+  if(destination==='updates')void loadUpdates(true);
+  if(destination==='hostHub')void loadHostHub();
+  if(destination!=='studio')stopPreview();
   notice('');window.scrollTo(0,0);
 }
 function renderRooms() {
   const query = $('roomSearch').value.trim().toLowerCase();
   const matches = allRooms.filter(r => (selectedCategory === 'All' || r.category === selectedCategory) && `${r.title} ${r.hostName}`.toLowerCase().includes(query));
-  matches.sort((a,b) => Number(currentUser.interests?.includes(b.category)) - Number(currentUser.interests?.includes(a.category)));
   $('roomCount').textContent = `${matches.length} live ${matches.length === 1 ? 'room' : 'rooms'}`;
   $('rooms').replaceChildren();$('rooms').className = 'rooms-grid';
   if (!matches.length) {
     const empty = document.createElement('div');empty.className='empty';
     const icon=document.createElement('div');icon.className='empty-icon';icon.textContent='✦';icon.setAttribute('aria-hidden','true');
-    const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'Be the first to say hello.';
-    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'It’s quiet here for now. Start your own live and invite someone into the conversation.';
-    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Start a live';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';updateFilters();renderRooms();}else navigate('studio');};
+    const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'No hosts are live right now.';
+    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'Follow a host below and see their next live in your updates.';
+    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Browse hosts';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';updateFilters();renderRooms();}else $('hostDirectory').scrollIntoView({behavior:'smooth'});};
     empty.append(icon,title,text,button);$('rooms').append(empty);return;
   }
   for (const room of matches) {
@@ -58,29 +63,24 @@ for(const category of ['All',...interests]) {const button=document.createElement
 $('roomSearch').oninput=renderRooms;
 async function refreshRooms() {
   if (activeRoom || !currentUser || $('discover').hidden) return;
-  try {const {rooms}=await api('/api/rooms');allRooms=rooms;renderRooms();}
+  try {const {rooms}=await api('/api/rooms');allRooms=rooms;renderRooms();void loadPeople(false);}
   catch(error){$('rooms').textContent=error.message;}
 }
 function renderProfile() {
   $('accountId').textContent=currentUser.id;renderAccess();
   paintAvatar($('profileAvatar'),currentUser.displayName,currentUser.avatar);
   $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || 'A little mystery is fine. Add a bio whenever you like.';
-  $('profileInterests').replaceChildren();for(const interest of currentUser.interests || []){const tag=document.createElement('span');tag.className='tag';tag.textContent=interest;$('profileInterests').append(tag);}
 }
-function setProfileStep(step) {
-  profileStep=step;$('profileStepOne').hidden=step!==1;$('profileStepTwo').hidden=step!==2;
-  $('profileCountry').required=step===1;$('profileCountry').disabled=step!==1;
-  $('profileName').required=step===1;$('profileName').disabled=step!==1;
-  $('profileBack').hidden=step===1;$('cancelProfile').hidden=!editingProfile;
-  $('onboardingProgress').textContent=`${editingProfile ? 'Your profile' : 'Make yourself at home'} · ${step} of 2`;
-  $('onboardingTitle').textContent=step===1 ? editingProfile ? 'Make it yours.' : 'A little about you.' : 'Find your kind of live.';
-  $('onboardingSubtitle').textContent=step===1 ? 'Give people a name and a face to say hello to.' : 'Pick the conversations you enjoy.';
-  $('profileNext').textContent=step===1 ? 'Continue' : editingProfile ? 'Save profile' : 'Enter Veya';$('profileError').textContent='';
+function setProfileStep() {
+  $('cancelProfile').hidden=!editingProfile;
+  $('onboardingProgress').textContent=editingProfile ? 'Your profile' : 'Make yourself at home';
+  $('onboardingTitle').textContent=editingProfile ? 'Make it yours.' : 'A little about you.';
+  $('onboardingSubtitle').textContent='Choose your name and country. Photo and bio are optional.';
+  $('profileNext').textContent=editingProfile ? 'Save profile' : 'Enter Veya';$('profileError').textContent='';
 }
 function openProfileSetup(editing=false) {
   editingProfile=editing;$('profileCountry').value=currentUser.country || '';draftAvatar=currentUser.avatar || '';$('profileName').value=currentUser.displayName;$('profileBio').value=currentUser.bio || '';
   $('onboardingAdult').checked=currentUser.adult;$('onboardingAdultLabel').hidden=currentUser.adult;paintAvatar($('avatarPreview'),currentUser.displayName,draftAvatar);
-  $('interestChoices').replaceChildren();for(const interest of interests){const label=document.createElement('label');label.className='interest-choice';const input=document.createElement('input');input.type='checkbox';input.value=interest;input.checked=currentUser.interests?.includes(interest);label.append(input,document.createTextNode(interest));$('interestChoices').append(label);}
   setProfileStep(1);navigate('onboarding');
 }
 $('profileName').oninput=()=>paintAvatar($('avatarPreview'),$('profileName').value,draftAvatar);
@@ -94,12 +94,12 @@ $('avatarFile').onchange=async()=>{
   }catch(e){$('profileError').textContent=e.message || 'Could not read that photo.';}finally{image?.close();$('avatarFile').value='';}
 };
 $('removeAvatar').onclick=()=>{draftAvatar='';paintAvatar($('avatarPreview'),$('profileName').value);};
-$('profileBack').onclick=()=>setProfileStep(1);$('cancelProfile').onclick=()=>navigate('profile');
+$('cancelProfile').onclick=()=>navigate('profile');
 $('profileForm').onsubmit=async event=>{
   event.preventDefault();$('profileError').textContent='';
-  if(profileStep===1){if(!currentUser.adult && !$('onboardingAdult').checked){$('profileError').textContent='Confirm you are 18 or older to continue.';return;}setProfileStep(2);return;}
+  if(!currentUser.adult && !$('onboardingAdult').checked){$('profileError').textContent='Confirm you are 18 or older to continue.';return;}
   $('profileNext').disabled=true;
-  try{const {user}=await api('/api/profile',{displayName:$('profileName').value,country:$('profileCountry').value,bio:$('profileBio').value,avatar:draftAvatar,interests:[...$('interestChoices').querySelectorAll('input:checked')].map(x=>x.value),adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
+  try{const {user}=await api('/api/profile',{displayName:$('profileName').value,country:$('profileCountry').value,bio:$('profileBio').value,avatar:draftAvatar,interests:[],adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
   catch(e){$('profileError').textContent=e.message;}finally{$('profileNext').disabled=false;}
 };
 $('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('emptyGoLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
@@ -109,7 +109,7 @@ function updateWatermark() {
   $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
 }
 function showRoom(room) {
-  for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
+  for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
   $('viewersPanel').hidden = role !== 'host'; $('leave').textContent = role === 'host' ? 'End live' : 'Leave';
   $('mute').textContent = 'Mute mic'; $('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';
@@ -177,11 +177,11 @@ function connect(firstMessage) {
   });
 }
 function cleanup() {
-  activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
+  stopPreview();activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
-  $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
+  $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
   $('reportDialog').close(); $('joinDialog').close(); $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
@@ -193,7 +193,7 @@ $('start').onclick = async () => {
   busy = true; $('start').disabled = true; role = 'host';
   try {
     if ($('title').value.trim().length < 3) throw Error('Enter a room title of at least 3 characters.');
-    localTracks = await createLocalTracks({ audio: true, video: { facingMode: 'user', resolution: { width: 640, height: 480, frameRate: 24 } } });
+    stopPreview();localTracks = await createLocalTracks(deviceOptions());
     await connect({ type: 'create', title: $('title').value, category: $('category').value, acceptRules: true, policyVersion: config.policyVersion });
   } catch (error) { cleanup(); notice(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : error.message); }
   finally { busy = false; updateAccount(currentUser); }
@@ -268,6 +268,7 @@ function updateAccount(user) {
   $('emailStatus').textContent = user.emailVerified ? 'Email verified' : config.accounts?.email ? 'Verify your email before joining or hosting lives.' : 'Email delivery setup is pending.';
   $('sendVerification').hidden = Boolean(user.emailVerified || !config.accounts?.email);
   $('adultConfirm').hidden = Boolean(user.adult); $('confirmAdult').hidden = Boolean(user.adult);
+  $('emptyGoLive').textContent=user.access?.canHost ? 'Start a live' : 'Become a host';
   $('navLive').textContent=user.access?.canHost ? '+ Go live' : 'Become a host';
   $('start').disabled = !user.access?.canHost || !user.access?.accessAllowed || !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
   if (config.accounts?.email && !user.emailVerified) $('emailStatus').closest('details').open = true;
@@ -307,8 +308,7 @@ $('applyHost').onclick=()=>{$('hostBio').value=currentUser.bio || '';$('hostAppl
 $('hostApplicationForm').onsubmit=async e=>{e.preventDefault();try{const result=await api('/api/host/apply',{bio:$('hostBio').value,languages:$('hostLanguages').value,experience:$('hostExperience').value,socialLinks:$('hostLinks').value,contact:$('hostContact').value});currentUser=result.user;$('hostApplyDialog').close();renderAccess();notice('Application received.');}catch(e){notice(e.message);}};
 $('phoneForm').onsubmit=async e=>{e.preventDefault();try{currentUser=(await api('/api/access/phone',{phone:$('accountPhone').value})).user;renderAccess();notice('Phone number saved.');}catch(e){notice(e.message);}};
 $('appealForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/access/appeal',{message:$('appealMessage').value});$('appealMessage').value='';await loadOwnAccess();notice('Appeal received.');}catch(e){notice(e.message);}};
-let managementData;
-const textElement=(tag,text)=>{const e=document.createElement(tag);e.textContent=text;return e;};
+
 function actionButton(label,action){const b=textElement('button',label);b.className='btn quiet';b.type='button';b.onclick=action;return b;}
 async function adminAction(input){try{await api('/api/admin/manage',input);await loadManagement();notice('Saved.');}catch(e){notice(e.message);}}
 function renderMembers(){
@@ -332,3 +332,18 @@ async function loadManagement(){
  $('adminAppeals').replaceChildren();if(managementData.appeals.length)$('adminAppeals').append(textElement('h2','Appeals'));for(const a of managementData.appeals){const card=document.createElement('div');card.className='admin-member';const response=document.createElement('textarea');response.value=a.response;response.maxLength=1000;response.setAttribute('aria-label','Reply to appeal');card.append(textElement('h2',a.name),textElement('p',`${a.status}: ${a.message}`),response,actionButton('Reply and mark reviewed',()=>adminAction({action:'appeal',appealId:a.id,status:'reviewed',response:response.value})));$('adminAppeals').append(card);}
 }
 $('memberSearch').oninput=()=>{if(managementData)renderMembers();};$('adminAccessTab').onclick=()=>loadManagement().catch(e=>notice(e.message));$('adminReportsTab').onclick=async()=>{try{await loadReports();$('management').hidden=true;$('reports').hidden=false;}catch(e){notice(e.message);}};
+
+$('navFollowing').onclick=()=>navigate('following');$('navUpdates').onclick=()=>navigate('updates');$('navHost').onclick=()=>navigate('hostHub');
+$('closePublicProfile').onclick=()=>$('publicProfileDialog').close();
+async function openPublicProfile(id){try{const {profile:p}=await api('/api/public-profile?id='+encodeURIComponent(id));paintAvatar($('publicAvatar'),p.displayName,p.avatar);$('publicName').textContent=p.displayName;$('publicBio').textContent=p.bio || 'Welcome to my profile.';$('publicCounts').textContent=`${p.followers} followers · ${p.following} following`;$('followHost').hidden=p.id===currentUser.id || (!p.isHost && !p.isFollowing);$('followHost').textContent=p.isFollowing?'Unfollow':'Follow';$('followHost').onclick=async()=>{try{await api('/api/follow',{userId:p.id,enabled:!p.isFollowing});await openPublicProfile(p.id);void loadPeople(false);}catch(e){notice(e.message);}};const {rooms}=await api('/api/rooms');const live=rooms.find(r=>r.hostId===p.id);$('joinProfileLive').hidden=!live;$('joinProfileLive').onclick=()=>{$('publicProfileDialog').close();requestJoin(live.id);};if(!$('publicProfileDialog').open)$('publicProfileDialog').showModal();}catch(e){notice(e.message);}}
+async function loadPeople(following){if(!currentUser?.access?.accessAllowed)return;const target=$(following?'followedHosts':'hostDirectory');try{const {people}=await api('/api/people?'+(following?'following=1':'hosts=1'));target.replaceChildren();if(!people.length){target.append(textElement('p',following?'You haven’t followed any hosts yet. Explore hosts and open their profile to follow.':'Approved hosts will appear here as they join.'));return;}for(const p of people){const card=document.createElement('div');card.className='card person-card';const avatar=document.createElement('div');avatar.className='avatar';paintAvatar(avatar,p.displayName,p.avatar);const copy=document.createElement('div');copy.append(textElement('strong',p.displayName),textElement('p',p.bio || (p.isHost?'Veya host':'Veya member')));const button=actionButton('View profile',()=>openPublicProfile(p.id));card.append(avatar,copy,button);target.append(card);}}catch(e){target.textContent=e.message;}}
+async function loadUpdates(render=false){if(!currentUser?.access?.accessAllowed)return;try{const result=await api('/api/notifications');notificationItems=result.items;$('navUpdates').textContent=result.unread ? `Updates (${result.unread})`:'Updates';if(!render)return;$('updateList').replaceChildren();if(!result.items.length)$('updateList').append(textElement('p','Your host updates and access decisions will appear here.'));const {rooms}=await api('/api/rooms');for(const n of result.items){const card=document.createElement('div');card.className='card';card.append(textElement('strong',n.message),textElement('p',new Date(n.createdAt).toLocaleString()));if(!n.seen)card.append(textElement('span','Unread'));const live=rooms.find(r=>r.id===n.roomId);if(live)card.append(actionButton('Join live',()=>requestJoin(live.id)));else if(n.kind==='live')card.append(textElement('p','This live has ended.'));$('updateList').append(card);}}catch(e){notice(e.message);}}
+$('markUpdatesRead').onclick=async()=>{try{await api('/api/notifications/read',{ids:notificationItems.map(n=>n.id)});await loadUpdates(true);}catch(e){notice(e.message);}};
+async function loadHostHub(){try{await loadOwnAccess();const d=await api('/api/host/dashboard');$('hostHubStatus').textContent=$('trialStatus').textContent;$('hostStats').textContent=`${d.stats.hours} live hours · ${d.stats.days} streaming days · ${d.stats.sessions} sessions`;$('hostRequirements').textContent=`Programme planning: ${d.trial.requirements.hours} hours, ${d.trial.requirements.days} days. Payment and withdrawal features are not active.`;$('hubStart').hidden=!currentUser.access.canHost;$('hubApply').hidden=currentUser.access.canHost || currentUser.access.applicationPending || !currentUser.access.accessAllowed;$('hostSessions').replaceChildren();for(const session of d.sessions){$('hostSessions').append(textElement('p',`${new Date(session.startedAt).toLocaleString()} · ${Math.round((session.lastSeen-session.startedAt)/60000)} minutes · ${session.endedAt?'Ended':'Active / last connected'}`));}if(!d.sessions.length)$('hostSessions').textContent='Your completed live sessions will appear here.';}catch(e){notice(e.message);}}
+$('hubStart').onclick=()=>navigate('studio');$('hubApply').onclick=()=>$('applyHost').click();
+function deviceOptions(){return {audio:$('micDevice').value?{deviceId:{exact:$('micDevice').value}}:true,video:{...($('cameraDevice').value?{deviceId:{exact:$('cameraDevice').value}}:{facingMode:'user'}),resolution:{width:640,height:480,frameRate:24}}};}
+function stopPreview(){previewGeneration++;for(const t of previewTracks){t.detach();t.stop();}previewTracks=[];$('cameraPreview').srcObject=null;$('cameraPreview').hidden=true;}
+async function populateDevices(){const devices=await navigator.mediaDevices.enumerateDevices();for(const [id,kind] of [['cameraDevice','videoinput'],['micDevice','audioinput']]){const select=$(id),previous=select.value;select.replaceChildren();const defaultOption=textElement('option','Default device');defaultOption.value='';select.append(defaultOption);for(const device of devices.filter(d=>d.kind===kind)){const option=textElement('option',device.label || `${kind==='videoinput'?'Camera':'Microphone'} ${select.options.length}`);option.value=device.deviceId;select.append(option);}select.value=previous;}}
+$('previewDevices').onclick=async()=>{if(busy)return;$('previewDevices').disabled=true;try{stopPreview();const generation=previewGeneration;const tracks=await createLocalTracks(deviceOptions());if(generation!==previewGeneration || $('studio').hidden){for(const t of tracks)t.stop();return;}previewTracks=tracks;previewTracks.find(t=>t.kind===Track.Kind.Video)?.attach($('cameraPreview'));$('cameraPreview').hidden=false;await populateDevices();$('deviceStatus').textContent='Preview is local. Change a device and click Check devices again.';}catch(e){stopPreview();$('deviceStatus').textContent=e.name==='NotAllowedError'?'Allow camera and microphone access to check your devices.':e.message;}finally{$('previewDevices').disabled=false;}};
+$('stopPreview').onclick=()=>{stopPreview();$('deviceStatus').textContent='Camera preview stopped.';};
+setInterval(()=>void loadUpdates(!$('updates').hidden),15000);void loadUpdates();

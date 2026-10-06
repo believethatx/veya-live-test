@@ -1,3 +1,4 @@
+import {publicProfile,people,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
 import {accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
 import { createServer } from 'node:http';
@@ -96,6 +97,14 @@ export function createApp({ media = createMedia() } = {}) {
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
+      if(req.method==='GET' && ['/api/people','/api/public-profile','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
+        if(url.pathname!=='/api/host/dashboard'){try{assertAccess(sessionUser,req);}catch(e){json(res,403,{error:e.message});return;}}
+        if(url.pathname==='/api/people')json(res,200,{people:people(sessionUser,{following:url.searchParams.get('following')==='1',search:url.searchParams.get('q') || '',hostsOnly:url.searchParams.get('hosts')==='1'})});
+        else if(url.pathname==='/api/public-profile')json(res,200,{profile:publicProfile(sessionUser,url.searchParams.get('id'))});
+        else if(url.pathname==='/api/notifications')json(res,200,notifications(sessionUser));
+        else json(res,200,hostDashboard(sessionUser,req));return;
+      }
       if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
       if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}json(res,200,management(sessionUser));return;}
       if (req.url === '/api/livekit/webhook' && req.method === 'POST') {
@@ -123,9 +132,16 @@ export function createApp({ media = createMedia() } = {}) {
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');
           json(res, 200, { ok: true }, { 'Set-Cookie': expiredCookie }); return;
         }
+        if(['/api/follow','/api/notifications/read'].includes(req.url)){
+          if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);const input=await jsonBody(req);
+          if(req.url==='/api/follow'){if(typeof input.enabled!=='boolean')throw Error('Choose follow or unfollow');json(res,200,{profile:follow(sessionUser,String(input.userId),input.enabled)});}
+          else{readNotifications(sessionUser,input.ids);json(res,200,{ok:true});}return;
+        }
         if(['/api/host/apply','/api/access/phone','/api/access/appeal','/api/admin/manage'].includes(req.url)){
           const user=userFromRequest(req);if(!user){json(res,401,{error:'Sign in first'});return;}const input=await jsonBody(req);
           if(req.url==='/api/admin/manage'){if(!isAdmin(user)){json(res,403,{error:'Admin access required'});return;}manage(user,input);
+            if(input.userId && ['tester','host'].includes(input.action))notify(String(input.userId),'access',input.action==='tester' ? input.approved ? 'Your tester access has been approved.' : 'Your tester access has been removed.' : `Your host status is now ${input.status}.`);
+            if(input.action==='appeal'){const appealRow=management(user).appeals.find(a=>a.id===input.appealId);if(appealRow)notify(appealRow.user_id,'appeal','An admin replied to your appeal.');}
             for(const socket of wss.clients){try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');}}
           }else if(req.url==='/api/host/apply'){assertAccess(user,req);applyHost(user,input);}
           else if(req.url==='/api/access/phone'){if(accessFor(user,req).blocked)throw Error('Phone changes are unavailable during a suspension');savePhone(user,input.phone);}
@@ -221,7 +237,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (msg.type === 'ready') {
           await media.verify(entry.room, socket.user, entry.role);
           if (!rooms.peer(socket) || socket.readyState !== WebSocket.OPEN) return;
-          rooms.ready(socket);if(entry.role==='host')startHours(entry.room,socket.user); send(socket, { type: 'ready' }); roster(entry.room); return;
+          const firstReady=!entry.ready;rooms.ready(socket);if(entry.role==='host'){startHours(entry.room,socket.user);if(firstReady)notifyLive(entry.room);} send(socket, { type: 'ready' }); roster(entry.room); return;
         }
         if (msg.type === 'chat') {
           if (!entry.ready) throw Error('Connect to the live room first');
