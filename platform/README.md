@@ -39,6 +39,6 @@ A future native Android client can use `FLAG_SECURE`; a future iOS client can re
 
 `npm test` verifies real HTTP/WebSocket clients with a fake media adapter, plus signed LiveKit token permissions, room membership, privacy consent, report access, moderation and logout. The fake adapter is test-only and is never selected by environment configuration.
 
-`scripts/browser-smoke.mjs` additionally exercises the complete UI against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). It does not record media or screenshot live streams.
+`scripts/browser-smoke.mjs` exercises the complete UI against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). `bash scripts/media-ci.sh` downloads the pinned server, verifies its checksum and runs that check. The full check passed on GitHub Actions, including video to two viewers, chat, reporting, removal and cleanup. It does not record media or screenshot live streams. See `VALIDATION.md` for the exact tested scope.
 
 This is not a finished public social app. Remaining: deployed media/backend connections and cross-network phone verification; email verification/recovery and meaningful age checks; complete profile/follow/discovery features; persistent bans and full moderation workflow; PK/cohosting; gifts/coin ledger, payments and payouts with server-side reconciliation. There is no simulated money or fake live activity in this build.
