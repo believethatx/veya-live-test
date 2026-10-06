@@ -1,0 +1,18 @@
+import {chromium} from 'playwright';
+import {strict as assert} from 'node:assert';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const directory=mkdtempSync(join(tmpdir(),'veya-host-hub-'));
+process.env.DATA_FILE=join(directory,'test.sqlite');process.env.ADMIN_USER_IDS='local-test-owner';
+const auth=await import('../auth.mjs');const access=await import('../access.mjs');const {createApp}=await import('../server.mjs');
+const owner={id:'local-test-owner'};
+function member(name){const registered=auth.register({email:name.toLowerCase()+'@example.test',displayName:name,password:'a long test password',adult:true});const user=auth.saveProfile(registered.id,{displayName:name,country:'GB',bio:'Hello',avatar:'',interests:[],adult:true});access.manage(owner,{action:'tester',userId:user.id,approved:true});return user;}
+const host=member('Streamer'),viewer=member('Viewer');access.manage(owner,{action:'host',userId:host.id,status:'trial',days:10});access.manage(owner,{action:'settings',trialDays:10,minimumHours:4,minimumDays:3,dailyHourCap:2,trialAmount:0,trialOutcome:'review',paidTrial:false,testingApproval:true});
+const {server}=createApp({media:{configured:false}});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
+const browser=await chromium.launch({headless:true});const errors=[];
+async function pageFor(user){const context=await browser.newContext({viewport:{width:390,height:844}});await context.addCookies([{name:'veya_session',value:auth.createSession(user.id),url:base}]);const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base);await page.locator('#discover').waitFor({state:'visible'});return {page,context};}
+try{
+ const h=await pageFor(host);await h.page.locator('#navProfile').click();await h.page.locator('#profileHostButton').click();await h.page.locator('#hostHub').waitFor({state:'visible'});await h.page.locator('#hostHoursTarget').getByText('0 / 4 hours').waitFor();assert.equal(await h.page.locator('#hostDaysTarget').textContent(),'0 / 3 days');assert.equal(await h.page.locator('#hostStage').textContent(),'Trial host');assert.equal(await h.page.locator('#hubStart').isVisible(),true);assert.equal(await h.page.locator('#hostEarningsMessage').textContent(),'Earnings, gift values and payouts are not active on Veya yet. No earnings are being tracked.');assert.equal(await h.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await h.page.screenshot({path:'/tmp/veya-host-hub-mobile.png',fullPage:true});
+ const v=await pageFor(viewer);await v.page.locator('#navProfile').click();assert.equal(await v.page.locator('#profileHostButton').isVisible(),false);assert.equal(await v.page.locator('#applyHost').isVisible(),true);assert.deepEqual(errors,[]);await h.context.close();await v.context.close();console.log('PASS: trial host sees weekly targets, activity, and honest earnings status on mobile; viewer has application path');
+}finally{await browser.close();await new Promise(r=>server.close(r));rmSync(directory,{recursive:true,force:true});}

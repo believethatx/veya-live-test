@@ -38,4 +38,23 @@ export function notify(userId,kind,message,{actorId=null,roomId=null,dedupe=rand
 export function notifyLive(room){for(const {follower_id:id} of db.prepare('SELECT follower_id FROM follows WHERE target_id=?').all(room.hostId)){if(!accessFor({id}).blocked)notify(id,'live',`${room.hostName} is live: ${room.title}`,{actorId:room.hostId,roomId:room.id,dedupe:'live:'+room.id});}}
 export function notifications(user){return {items:db.prepare('SELECT id,kind,message,actor_id AS actorId,room_id AS roomId,created_at AS createdAt,seen FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 200').all(user.id),unread:db.prepare('SELECT COUNT(*) AS n FROM notifications WHERE user_id=? AND seen=0').get(user.id).n};}
 export function readNotifications(user,ids){if(!Array.isArray(ids)||ids.length>200||ids.some(id=>typeof id!=='string'||!/^[0-9a-f]{32}$/.test(id)))throw Error('Invalid notifications');const stmt=db.prepare('UPDATE notifications SET seen=1 WHERE user_id=? AND id=?');for(const id of ids)stmt.run(user.id,id);}
-export function hostDashboard(user,req){const access=accessFor(user,req);const s=settings();const rows=db.prepare('SELECT room_id AS roomId,started_at AS startedAt,last_seen AS lastSeen,ended_at AS endedAt FROM host_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT 30').all(user.id);const stats=db.prepare('SELECT COUNT(*) AS sessions,COALESCE(SUM(last_seen-started_at),0) AS ms,COUNT(DISTINCT date(started_at/1000,\'unixepoch\')) AS days FROM host_sessions WHERE user_id=?').get(user.id);return {access,stats:{sessions:stats.sessions,hours:Math.round(stats.ms/36000)/100,days:stats.days},sessions:rows,trial:{endsAt:access.trialEnd,status:access.hostStatus,expired:access.hostStatus==='review',requirements:{hours:s.minimumHours,days:s.minimumDays,dailyCap:s.dailyHourCap},paidPlanning:s.paidTrial},application:db.prepare('SELECT application FROM access_members WHERE user_id=?').get(user.id)?.application || ''};}
+export function weeklyActivity(sessions,now,capHours=0){
+ const day=86400000;
+ const todayStart=Math.floor(now/day)*day,weekday=new Date(todayStart).getUTCDay(),weekStart=todayStart-((weekday+6)%7)*day;
+ const daily=new Map();
+ for(const session of sessions){
+   let cursor=Math.max(session.startedAt,weekStart),end=Math.min(session.lastSeen,now);
+   while(cursor<end){const bucket=Math.floor(cursor/day)*day,next=Math.min(end,bucket+day);daily.set(bucket,(daily.get(bucket)||0)+(next-cursor));cursor=next;}
+ }
+ const todayMs=daily.get(todayStart)||0,weekMs=[...daily.values()].reduce((sum,ms)=>sum+ms,0);
+ const capMs=capHours>0?capHours*3600000:Infinity,qualifiedMs=[...daily.values()].reduce((sum,ms)=>sum+Math.min(ms,capMs),0);
+ const hours=ms=>Math.round(ms/36000)/100;
+ return {todayHours:hours(todayMs),weekHours:hours(weekMs),qualifyingHours:hours(qualifiedMs),weekDays:[...daily.values()].filter(ms=>ms>0).length,weekStart,weekEnd:weekStart+7*day};
+}
+export function hostDashboard(user,req){
+ const access=accessFor(user,req),s=settings(),now=Date.now(),day=86400000,weekStart=Math.floor(now/day)*day-((new Date(now).getUTCDay()+6)%7)*day;
+ const rows=db.prepare('SELECT room_id AS roomId,started_at AS startedAt,last_seen AS lastSeen,ended_at AS endedAt FROM host_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT 30').all(user.id);
+ const stats=db.prepare('SELECT COUNT(*) AS sessions,COALESCE(SUM(MAX(last_seen-started_at,0)),0) AS ms,COUNT(DISTINCT date(started_at/1000,\'unixepoch\')) AS days FROM host_sessions WHERE user_id=?').get(user.id);
+ const sessions=db.prepare('SELECT started_at AS startedAt,last_seen AS lastSeen FROM host_sessions WHERE user_id=? AND last_seen>? AND started_at<?').all(user.id,weekStart,now);
+ return {access,stats:{sessions:stats.sessions,hours:Math.round(stats.ms/36000)/100,days:stats.days},activity:weeklyActivity(sessions,now,s.dailyHourCap),sessions:rows,trial:{endsAt:access.trialEnd,status:access.hostStatus,expired:access.hostStatus==='review',requirements:{hours:s.minimumHours,days:s.minimumDays,dailyCap:s.dailyHourCap}},earnings:{status:'not_enabled',message:'Earnings, gift values and payouts are not active on Veya yet. No earnings are being tracked.'},application:db.prepare('SELECT application FROM access_members WHERE user_id=?').get(user.id)?.application || ''};
+}
