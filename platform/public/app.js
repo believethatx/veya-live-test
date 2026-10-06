@@ -148,7 +148,7 @@ async function attachMedia(credentials, roomInfo) {
     for (const track of localTracks) {
       const camera=track.kind===Track.Kind.Video,output=camera ? await createCameraEffect(track) || track : track;
       const publication=await room.localParticipant.publishTrack(output,{source:camera?Track.Source.Camera:Track.Source.Microphone});
-      if(camera)publication.track.attach($('local'));
+      if(camera){publication.track.attach($('local'));$('local').dataset.filtered=String(output!==track);}
     }
   } else {
     for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
