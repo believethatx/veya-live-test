@@ -17,7 +17,7 @@ function paintAvatar(element, name, avatar = '') {
   else element.textContent = (name || 'V').trim().slice(0,1).toUpperCase();
 }
 function navigate(destination, force = false) {
-  if(currentUser && !force && !currentUser.access?.accessAllowed && destination!=='onboarding')destination='profile';
+  if(currentUser && !force && !currentUser.access?.accessAllowed && !currentUser.admin && destination!=='onboarding')destination='profile';
   if(destination==='studio' && !currentUser.access?.canHost){destination='profile';}
   if (!force && (busy || activeRoom)) {notice('Leave your live room first.');return;}
   for (const id of ['discover','profile','studio','onboarding','admin']) $(id).hidden = id !== destination;
@@ -103,7 +103,7 @@ $('profileForm').onsubmit=async event=>{
   catch(e){$('profileError').textContent=e.message;}finally{$('profileNext').disabled=false;}
 };
 $('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('emptyGoLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
-function requestJoin(id) { if (busy || activeRoom) return; if(!currentUser.adult || (config.accounts?.email && !currentUser.emailVerified)){navigate('profile');notice('Verify your email before joining a live.');return;} pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
+function requestJoin(id) { if (busy || activeRoom) return;if(!currentUser.access?.accessAllowed){navigate('profile');notice('Tester access is waiting for admin approval.');return;} if(!currentUser.adult || (config.accounts?.email && !currentUser.emailVerified)){navigate('profile');notice('Verify your email before joining a live.');return;} pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
 function updateWatermark() {
   if (!activeRoom) return;
   $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
@@ -181,7 +181,7 @@ function cleanup() {
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
-  $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate('discover',true);else openProfileSetup();} $('hearAudio').hidden = true;
+  $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
   $('reportDialog').close(); $('joinDialog').close(); $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
@@ -228,7 +228,7 @@ async function showSignedIn(user) {
   currentUser=user;updateAccount(user);$('account').hidden=true;$('who').textContent=user.displayName;$('openAdmin').hidden=!user.admin;
   if(!user.onboarded){openProfileSetup();return;}
   navigate(user.access?.accessAllowed ? 'discover' : 'profile');await refreshRooms();
-  if(linkedRoom && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)){const invitation=linkedRoom;linkedRoom=null;requestJoin(invitation);}
+  if(linkedRoom && user.access?.accessAllowed && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)){const invitation=linkedRoom;linkedRoom=null;requestJoin(invitation);}
 }
 $('accountForm').onsubmit = async event => {
   event.preventDefault(); notice(''); $('submitAccount').disabled = true;
