@@ -1,5 +1,5 @@
 import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
-import {publicProfile,people,connections,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
+import {publicProfile,people,connections,follow,moments,createMoment,likeMoment,removeMoment,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
 import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
 import { createServer } from 'node:http';
@@ -98,12 +98,13 @@ export function createApp({ media = createMedia() } = {}) {
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
-      if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
+      if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/moments','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
         if(url.pathname!=='/api/host/dashboard'){try{assertAccess(sessionUser,req);}catch(e){json(res,403,{error:e.message});return;}}
         if(url.pathname==='/api/people')json(res,200,{people:people(sessionUser,{following:url.searchParams.get('following')==='1',search:url.searchParams.get('q') || '',hostsOnly:url.searchParams.get('hosts')==='1'})});
         else if(url.pathname==='/api/public-profile')json(res,200,{profile:publicProfile(sessionUser,url.searchParams.get('id'))});
         else if(url.pathname==='/api/connections')json(res,200,connections(sessionUser,url.searchParams.get('id'),url.searchParams.get('kind'),Number(url.searchParams.get('offset') || 0)));
+        else if(url.pathname==='/api/moments')json(res,200,{moments:moments(sessionUser,url.searchParams.get('id'))});
         else if(url.pathname==='/api/notifications')json(res,200,notifications(sessionUser));
         else json(res,200,hostDashboard(sessionUser,req));return;
       }
@@ -139,6 +140,13 @@ export function createApp({ media = createMedia() } = {}) {
           if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);const input=await jsonBody(req);
           if(req.url==='/api/follow'){if(typeof input.enabled!=='boolean')throw Error('Choose follow or unfollow');json(res,200,{profile:follow(sessionUser,String(input.userId),input.enabled)});}
           else{readNotifications(sessionUser,input.ids);json(res,200,{ok:true});}return;
+        }
+        if(['/api/moments/create','/api/moments/like','/api/moments/remove'].includes(req.url)){
+          if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+          const input=await jsonBody(req,req.url==='/api/moments/create'?170000:4096);
+          if(req.url==='/api/moments/create')json(res,200,{id:createMoment(sessionUser,input)});
+          else if(req.url==='/api/moments/like'){if(typeof input.enabled!=='boolean')throw Error('Choose like or unlike');json(res,200,likeMoment(sessionUser,String(input.id),input.enabled));}
+          else{removeMoment(sessionUser,String(input.id));json(res,200,{ok:true});}return;
         }
         if(['/api/host/apply','/api/access/phone','/api/access/appeal','/api/admin/manage'].includes(req.url)){
           const user=userFromRequest(req);if(!user){json(res,401,{error:'Sign in first'});return;}const input=await jsonBody(req);
