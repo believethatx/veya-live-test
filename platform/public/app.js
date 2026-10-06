@@ -73,10 +73,12 @@ function renderProfile() {
   $('profileAdminNotice').hidden=!(currentUser.profileLocked || currentUser.profileRemoved);$('profileAdminNotice').textContent=currentUser.profileRemoved?'Your public profile has been removed. Contact support to request restoration.':'Profile editing is locked. Contact support to request a change.';$('editProfile').disabled=Boolean(currentUser.profileLocked || currentUser.profileRemoved);
   $('accountId').textContent=currentUser.id;renderAccess();
   paintAvatar($('profileAvatar'),currentUser.displayName,currentUser.avatar);
+  $('profileHome').dataset.theme=currentUser.theme || 'violet';paintCover($('profileOwnCover'),currentUser.banner);
   paintProfileDetails('profile',currentUser);
   $('profileFollowers').textContent='—';$('profileFollowing').textContent='—';void loadProfileStats();
-  $('viewOwnPublicProfile').hidden=!currentUser.access?.accessAllowed;
+  $('viewOwnPublicProfile').hidden=!currentUser.access?.accessAllowed || currentUser.profileRemoved;
   $('profileCountryLabel').textContent='Country or region: '+(config.countries?.find(c=>c.code===currentUser.country)?.name || currentUser.country);
+  $('profileOwnCountry').textContent=config.countries?.find(c=>c.code===currentUser.country)?.name || currentUser.country || 'Choose country';
   $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || '';
 }
 function setProfileStep() {
@@ -315,6 +317,7 @@ function renderAccess(){
  const role=currentUser.access?.hostStatus;$('profileRole').textContent=currentUser.access?.canHost ? role==='trial' ? 'Trial host':'Host' : 'Viewer';$('profileSupport').open=Boolean(currentUser.access?.blocked);
  const a=currentUser.access || {};$('accessStatus').textContent=a.blocked ? `Access suspended: ${a.blockReason}` : a.accessAllowed ? 'Tester access approved. You can watch and chat.' : 'Tester access is waiting for admin approval. Share your account ID with the admin.';
  $('applyHost').hidden=!a.accessAllowed || a.canHost || a.applicationPending || a.blocked;
+ $('profileHostButton').hidden=!a.canHost && !a.applicationPending && ['viewer','rejected'].includes(a.hostStatus);
  $('trialStatus').textContent=a.hostStatus==='trial' ? `Trial host · ends ${new Date(a.trialEnd).toLocaleDateString()}` : a.applicationPending ? 'Host application received. An admin will review it.' : a.hostStatus==='review' ? 'Your trial has ended. Host access is awaiting review.' : a.canHost ? 'Host access approved.' : 'Viewer account. Streaming needs separate approval.';$('trialStatus').textContent+=` · ${a.liveHours || 0} tracked live hours`;
  $('accessStatus').hidden=Boolean(a.accessAllowed && !a.blocked);$('trialStatus').hidden=Boolean(a.hostStatus==='viewer' && !a.applicationPending);$('profile').querySelector('.profile-access').hidden=Boolean(a.accessAllowed && !a.blocked && $('applyHost').hidden && $('trialStatus').hidden);
  $('accountPhone').value=a.phone || '';
