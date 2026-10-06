@@ -1,5 +1,5 @@
 import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
-import {publicProfile,people,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
+import {publicProfile,people,connections,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
 import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
 import { createServer } from 'node:http';
@@ -98,11 +98,12 @@ export function createApp({ media = createMedia() } = {}) {
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
-      if(req.method==='GET' && ['/api/people','/api/public-profile','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
+      if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
         if(url.pathname!=='/api/host/dashboard'){try{assertAccess(sessionUser,req);}catch(e){json(res,403,{error:e.message});return;}}
         if(url.pathname==='/api/people')json(res,200,{people:people(sessionUser,{following:url.searchParams.get('following')==='1',search:url.searchParams.get('q') || '',hostsOnly:url.searchParams.get('hosts')==='1'})});
         else if(url.pathname==='/api/public-profile')json(res,200,{profile:publicProfile(sessionUser,url.searchParams.get('id'))});
+        else if(url.pathname==='/api/connections')json(res,200,connections(sessionUser,url.searchParams.get('id'),url.searchParams.get('kind'),Number(url.searchParams.get('offset') || 0)));
         else if(url.pathname==='/api/notifications')json(res,200,notifications(sessionUser));
         else json(res,200,hostDashboard(sessionUser,req));return;
       }
