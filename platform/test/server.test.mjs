@@ -13,7 +13,8 @@ const next = (socket, type) => new Promise((resolve, reject) => {
 });
 const exchange = (socket, input, type) => { const output = next(socket, type); socket.send(JSON.stringify(input)); return output; };
 test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, logout and cleanup', async t => {
-  const removed = [], ended = [], media = { configured: true, token: async () => ({ token: 'fake-only-in-test', url: 'ws://localhost:7880' }), verify: async () => {}, remove: async (room, id) => removed.push(id), end: async room => ended.push(room.id), webhook: async () => { throw Error('invalid'); } };
+  let cameraAvailable = false;
+  const removed = [], ended = [], media = { configured: true, token: async () => ({ token: 'fake-only-in-test', url: 'ws://localhost:7880' }), verify: async (room, user, role) => { if (role === 'host' && !cameraAvailable) throw Error('Your camera is not live yet'); }, remove: async (room, id) => removed.push(id), end: async room => ended.push(room.id), webhook: async () => { throw Error('invalid'); } };
   const { server } = createApp({ media }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const sockets = []; t.after(async () => { for (const socket of sockets) socket.terminate(); await new Promise(resolve => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); });
@@ -37,7 +38,9 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   const consent = { acceptRules: true, policyVersion: POLICY_VERSION };
   const { room } = await exchange(host, { type: 'create', title: 'A real live room', category: 'Chat', ...consent }, 'created');
   assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms.length, 0);
-  await exchange(host, { type: 'ready' }, 'ready');
+  assert.match((await exchange(host, { type: 'ready' }, 'error')).message, /camera is not live/);
+  assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms.length, 0);
+  cameraAvailable = true; await exchange(host, { type: 'ready' }, 'ready');
   const viewerA = await connect(a), viewerB = await connect(b);
   await exchange(viewerA, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerA, { type: 'ready' }, 'ready');
   await exchange(viewerB, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerB, { type: 'ready' }, 'ready');

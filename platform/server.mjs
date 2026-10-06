@@ -24,9 +24,9 @@ export function createApp({ media = createMedia() } = {}) {
     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss: ws:; media-src 'self' blob:; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   };
   async function body(req, limit = 4096) {
-    let text = '';
-    for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > limit) throw Error('Request too large'); }
-    return text;
+    const chunks = []; let size = 0;
+    for await (const chunk of req) { size += chunk.length; if (size > limit) throw Error('Request too large'); chunks.push(chunk); }
+    return Buffer.concat(chunks).toString('utf8');
   }
   async function jsonBody(req) {
     if (!req.headers['content-type']?.startsWith('application/json')) throw Error('JSON body required');

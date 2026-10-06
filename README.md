@@ -1,5 +1,7 @@
-# Veya Live test build
+# Veya Live
 
-This is an early browser test of the mobile interface and device camera/microphone preview. Rooms, chat, viewers, coins and gifts are simulated; no live video is sent to another device yet.
+The public GitHub Pages page now shows an honest development notice. The older simulated streaming interface has been removed.
 
-Open the published GitHub Pages URL in Safari, then use Share > Add to Home Screen.
+The `development` branch contains the real account and room application under `platform/`, using LiveKit video/audio with multiple viewers, chat and basic moderation. See `platform/README.md` for setup and `platform/VALIDATION.md` for passed checks and unverified work.
+
+The full app is not deployed or finished. LiveKit project configuration and backend hosting are still required. Recording/screenshots are prohibited by the room rules, but device capture cannot be technically prevented in this browser version.
