@@ -4,7 +4,7 @@ export class RoomRegistry {
   constructor() { this.rooms = new Map(); this.peers = new Map(); }
   list() {
     return [...this.rooms.values()].filter(r => r.live).map(r => ({
-      id: r.id, title: r.title, category: r.category, hostName: r.hostName,
+      id: r.id, title: r.title, category: r.category, hostName: r.hostName, hostAvatar: r.host.user.avatar || '',
       viewers: [...r.viewers].filter(s => this.peers.get(s)?.ready).length, startedAt: r.startedAt,
     }));
   }

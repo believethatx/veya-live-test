@@ -9,27 +9,103 @@ async function api(path, input) {
   const response = await fetch(path, input === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
   const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
 }
-async function refreshRooms() {
-  if (activeRoom || !currentUser) return;
-  try {
-    const { rooms } = await api('/api/rooms'); $('rooms').replaceChildren();
-    if (!rooms.length) { $('rooms').className = 'empty'; $('rooms').textContent = 'No one is live yet. Start the first conversation.'; return; }
-    $('rooms').className = '';
-    for (const room of rooms) {
-      const button = document.createElement('button'); button.className = 'room-item';
-      const name = document.createElement('strong'); name.textContent = room.title;
-      const detail = document.createElement('small'); detail.textContent = `${room.hostName} · ${room.category} · ${room.viewers} viewers`;
-      button.append(name, detail); button.onclick = () => requestJoin(room.id); $('rooms').append(button);
-    }
-  } catch (error) { $('rooms').textContent = error.message; }
+const interests = ['Chat', 'Music', 'Gaming', 'Other'];
+let allRooms = [], selectedCategory = 'All', profileStep = 1, draftAvatar = '', editingProfile = false;
+function paintAvatar(element, name, avatar = '') {
+  element.replaceChildren();
+  if (avatar) {const img = document.createElement('img');img.src = avatar;img.alt = '';element.append(img);}
+  else element.textContent = (name || 'V').trim().slice(0,1).toUpperCase();
 }
-function requestJoin(id) { if (busy || activeRoom) return; pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
+function navigate(destination, force = false) {
+  if (!force && (busy || activeRoom)) {notice('Leave your live room first.');return;}
+  for (const id of ['discover','profile','studio','onboarding','admin']) $(id).hidden = id !== destination;
+  $('appNav').hidden = destination === 'onboarding';
+  for (const [id,target] of [['navHome','discover'],['navProfile','profile'],['navLive','studio']]) {
+    if (target === destination) $(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
+  }
+  if(destination === 'discover') void refreshRooms();
+  if(destination === 'profile') renderProfile();
+  notice('');window.scrollTo(0,0);
+}
+function renderRooms() {
+  const query = $('roomSearch').value.trim().toLowerCase();
+  const matches = allRooms.filter(r => (selectedCategory === 'All' || r.category === selectedCategory) && `${r.title} ${r.hostName}`.toLowerCase().includes(query));
+  matches.sort((a,b) => Number(currentUser.interests?.includes(b.category)) - Number(currentUser.interests?.includes(a.category)));
+  $('roomCount').textContent = `${matches.length} live ${matches.length === 1 ? 'room' : 'rooms'}`;
+  $('rooms').replaceChildren();$('rooms').className = 'rooms-grid';
+  if (!matches.length) {
+    const empty = document.createElement('div');empty.className='empty';
+    const icon=document.createElement('div');icon.className='empty-icon';icon.textContent='✦';icon.setAttribute('aria-hidden','true');
+    const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'Be the first to say hello.';
+    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'It’s quiet here for now. Start your own live and invite someone into the conversation.';
+    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Start a live';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';updateFilters();renderRooms();}else navigate('studio');};
+    empty.append(icon,title,text,button);$('rooms').append(empty);return;
+  }
+  for (const room of matches) {
+    const button=document.createElement('button');button.className='room-item';
+    const cover=document.createElement('div');cover.className='room-cover';
+    const badge=document.createElement('span');badge.className='live-label';badge.textContent='LIVE';
+    const avatar=document.createElement('div');avatar.className='avatar';paintAvatar(avatar,room.hostName,room.hostAvatar);cover.append(badge,avatar);
+    const copy=document.createElement('div');copy.className='room-copy';const name=document.createElement('strong');name.textContent=room.title;
+    const detail=document.createElement('small');detail.textContent=`${room.hostName} · ${room.category} · ${room.viewers} viewers`;
+    copy.append(name,detail);button.append(cover,copy);button.onclick=()=>requestJoin(room.id);$('rooms').append(button);
+  }
+}
+function updateFilters() {for(const button of $('categoryFilters').children)button.setAttribute('aria-pressed',String(button.dataset.category===selectedCategory));}
+for(const category of ['All',...interests]) {const button=document.createElement('button');button.className='filter-chip';button.dataset.category=category;button.textContent=category;button.onclick=()=>{selectedCategory=category;updateFilters();renderRooms();};$('categoryFilters').append(button);}updateFilters();
+$('roomSearch').oninput=renderRooms;
+async function refreshRooms() {
+  if (activeRoom || !currentUser || $('discover').hidden) return;
+  try {const {rooms}=await api('/api/rooms');allRooms=rooms;renderRooms();}
+  catch(error){$('rooms').textContent=error.message;}
+}
+function renderProfile() {
+  paintAvatar($('profileAvatar'),currentUser.displayName,currentUser.avatar);
+  $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || 'A little mystery is fine. Add a bio whenever you like.';
+  $('profileInterests').replaceChildren();for(const interest of currentUser.interests || []){const tag=document.createElement('span');tag.className='tag';tag.textContent=interest;$('profileInterests').append(tag);}
+}
+function setProfileStep(step) {
+  profileStep=step;$('profileStepOne').hidden=step!==1;$('profileStepTwo').hidden=step!==2;
+  $('profileName').required=step===1;$('profileName').disabled=step!==1;
+  $('profileBack').hidden=step===1;$('cancelProfile').hidden=!editingProfile;
+  $('onboardingProgress').textContent=`${editingProfile ? 'Your profile' : 'Make yourself at home'} · ${step} of 2`;
+  $('onboardingTitle').textContent=step===1 ? editingProfile ? 'Make it yours.' : 'A little about you.' : 'Find your kind of live.';
+  $('onboardingSubtitle').textContent=step===1 ? 'Give people a name and a face to say hello to.' : 'Pick the conversations you enjoy.';
+  $('profileNext').textContent=step===1 ? 'Continue' : editingProfile ? 'Save profile' : 'Enter Veya';$('profileError').textContent='';
+}
+function openProfileSetup(editing=false) {
+  editingProfile=editing;draftAvatar=currentUser.avatar || '';$('profileName').value=currentUser.displayName;$('profileBio').value=currentUser.bio || '';
+  $('onboardingAdult').checked=currentUser.adult;$('onboardingAdultLabel').hidden=currentUser.adult;paintAvatar($('avatarPreview'),currentUser.displayName,draftAvatar);
+  $('interestChoices').replaceChildren();for(const interest of interests){const label=document.createElement('label');label.className='interest-choice';const input=document.createElement('input');input.type='checkbox';input.value=interest;input.checked=currentUser.interests?.includes(interest);label.append(input,document.createTextNode(interest));$('interestChoices').append(label);}
+  setProfileStep(1);navigate('onboarding');
+}
+$('profileName').oninput=()=>paintAvatar($('avatarPreview'),$('profileName').value,draftAvatar);
+$('avatarFile').onchange=async()=>{
+  const file=$('avatarFile').files[0];if(!file)return;let image;
+  try{
+    if(!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>5*1024*1024)throw Error('Choose a JPG, PNG or WebP photo under 5 MB.');
+    image=await createImageBitmap(file);const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#171c2a';ctx.fillRect(0,0,256,256);
+    const size=Math.min(image.width,image.height);ctx.drawImage(image,(image.width-size)/2,(image.height-size)/2,size,size,0,0,256,256);
+    draftAvatar=canvas.toDataURL('image/jpeg',.82);paintAvatar($('avatarPreview'),$('profileName').value,draftAvatar);$('profileError').textContent='';
+  }catch(e){$('profileError').textContent=e.message || 'Could not read that photo.';}finally{image?.close();$('avatarFile').value='';}
+};
+$('removeAvatar').onclick=()=>{draftAvatar='';paintAvatar($('avatarPreview'),$('profileName').value);};
+$('profileBack').onclick=()=>setProfileStep(1);$('cancelProfile').onclick=()=>navigate('profile');
+$('profileForm').onsubmit=async event=>{
+  event.preventDefault();$('profileError').textContent='';
+  if(profileStep===1){if(!currentUser.adult && !$('onboardingAdult').checked){$('profileError').textContent='Confirm you are 18 or older to continue.';return;}setProfileStep(2);return;}
+  $('profileNext').disabled=true;
+  try{const {user}=await api('/api/profile',{displayName:$('profileName').value,bio:$('profileBio').value,avatar:draftAvatar,interests:[...$('interestChoices').querySelectorAll('input:checked')].map(x=>x.value),adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
+  catch(e){$('profileError').textContent=e.message;}finally{$('profileNext').disabled=false;}
+};
+$('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('emptyGoLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
+function requestJoin(id) { if (busy || activeRoom) return; if(!currentUser.adult || (config.accounts?.email && !currentUser.emailVerified)){navigate('profile');notice('Verify your email before joining a live.');return;} pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
 function updateWatermark() {
   if (!activeRoom) return;
   $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
 }
 function showRoom(room) {
-  $('discover').hidden = true; $('room').hidden = false; $('roomTitle').textContent = room.title;
+  for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
   $('viewersPanel').hidden = role !== 'host'; $('leave').textContent = role === 'host' ? 'End live' : 'Leave';
   $('mute').textContent = 'Mute mic'; $('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';
@@ -101,7 +177,7 @@ function cleanup() {
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
-  $('room').hidden = true; $('discover').hidden = !currentUser; $('hearAudio').hidden = true;
+  $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate('discover',true);else openProfileSetup();} $('hearAudio').hidden = true;
   $('reportDialog').close(); $('joinDialog').close(); $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
@@ -115,7 +191,7 @@ $('start').onclick = async () => {
     localTracks = await createLocalTracks({ audio: true, video: { facingMode: 'user', resolution: { width: 640, height: 480, frameRate: 24 } } });
     await connect({ type: 'create', title: $('title').value, category: $('category').value, acceptRules: true, policyVersion: config.policyVersion });
   } catch (error) { cleanup(); notice(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : error.message); }
-  finally { busy = false; $('start').disabled = !config.mediaConfigured; }
+  finally { busy = false; updateAccount(currentUser); }
 };
 $('cancelJoin').onclick = () => $('joinDialog').close();
 $('confirmJoin').onclick = async () => {
@@ -142,10 +218,12 @@ $('toggleAccount').onclick = () => {
   $('formTitle').textContent = registering ? 'Create your account' : 'Sign in'; $('submitAccount').textContent = registering ? 'Create account' : 'Sign in';
   $('toggleAccount').textContent = registering ? 'Sign in instead' : 'Create account'; $('password').autocomplete = registering ? 'new-password' : 'current-password';
 };
-const linkedRoom = new URLSearchParams(location.search).get('room');
+let linkedRoom = new URLSearchParams(location.search).get('room');
 async function showSignedIn(user) {
-  currentUser = user; updateAccount(user); $('account').hidden = true; $('discover').hidden = false; $('who').textContent = user.displayName; $('openAdmin').hidden = !user.admin;
-  await refreshRooms(); if (linkedRoom && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)) requestJoin(linkedRoom);
+  currentUser=user;updateAccount(user);$('account').hidden=true;$('who').textContent=user.displayName;$('openAdmin').hidden=!user.admin;
+  if(!user.onboarded){openProfileSetup();return;}
+  navigate('discover');await refreshRooms();
+  if(linkedRoom && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)){const invitation=linkedRoom;linkedRoom=null;requestJoin(invitation);}
 }
 $('accountForm').onsubmit = async event => {
   event.preventDefault(); notice(''); $('submitAccount').disabled = true;
@@ -155,7 +233,7 @@ $('accountForm').onsubmit = async event => {
     const { user } = await api(registering ? '/api/register' : '/api/login', input); $('password').value = ''; await showSignedIn(user);
   } catch (error) { notice(error.message); } finally { $('submitAccount').disabled = false; }
 };
-$('logout').onclick = async () => { try { await api('/api/logout', {}); currentUser = null; cleanup(); $('admin').hidden = true; $('account').hidden = false; $('openAdmin').hidden = true; notice('Signed out.'); } catch (error) { notice(error.message); } };
+$('logout').onclick = async () => { try { await api('/api/logout', {}); currentUser = null; cleanup(); $('admin').hidden = true; $('account').hidden = false; $('appNav').hidden=true; $('openAdmin').hidden = true; notice('Signed out.'); } catch (error) { notice(error.message); } };
 async function loadReports() {
   const { reports } = await api('/api/admin/reports'); $('reports').replaceChildren();
   if (!reports.length) $('reports').textContent = 'No reports yet.';
@@ -172,8 +250,8 @@ async function loadReports() {
     actions.append(end, review); item.append(heading, description, details, actions); $('reports').append(item);
   }
 }
-$('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave your room before opening moderation.'); return; } try { await loadReports(); $('discover').hidden = true; $('admin').hidden = false; } catch (error) { notice(error.message); } };
-$('closeAdmin').onclick = () => { $('admin').hidden = true; $('discover').hidden = false; refreshRooms(); };
+$('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave your room before opening moderation.'); return; } try { await loadReports(); navigate('admin'); } catch (error) { notice(error.message); } };
+$('closeAdmin').onclick = () => navigate('discover');
 $('videoStage').oncontextmenu = event => event.preventDefault();
 window.addEventListener('pagehide', cleanup);
 setInterval(() => { if (currentUser && !$('discover').hidden) refreshRooms(); }, 10000);
@@ -186,7 +264,7 @@ function updateAccount(user) {
   $('sendVerification').hidden = Boolean(user.emailVerified || !config.accounts?.email);
   $('adultConfirm').hidden = Boolean(user.adult); $('confirmAdult').hidden = Boolean(user.adult);
   $('start').disabled = !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
-  if (!user.adult || (config.accounts?.email && !user.emailVerified)) $('emailStatus').closest('details').open = true;
+  if (config.accounts?.email && !user.emailVerified) $('emailStatus').closest('details').open = true;
 }
 for (const button of document.querySelectorAll('[data-provider]')) button.onclick = () => { location.href = `/auth/${button.dataset.provider}`; };
 $('sendVerification').onclick = async () => { $('sendVerification').disabled = true; try { const result = await api('/api/account/send-verification',{}); notice(result.message); } catch (e) { notice(e.message); } finally { $('sendVerification').disabled = false; } };

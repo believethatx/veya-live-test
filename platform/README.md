@@ -55,4 +55,10 @@ Email: set separate `RESEND_API_KEY` and `EMAIL_FROM` values using a verified Ve
 
 Verification and reset links have one-use hashed tokens, expire after 60/30 minutes, and reset revokes all sessions. Link tokens are in the URL fragment and cleared before further navigation. Send requests return the same message for unknown accounts. Delivery has a per-address cooldown and 100-request daily guard per running instance; this is not a provider billing cap. Provider callbacks use browser-bound, one-use state, with PKCE and nonce validation for Google.
 
-Status: automated security and local browser checks cover code behavior. Real Google/Facebook sign-in and email delivery still require credentials and live provider checks. SMS and WhatsApp verification are not enabled.
+Status: automated security and local browser checks cover code behavior. Google sign-in and host publishing have been confirmed by the owner on the hosted Veya build. Facebook and email delivery still require configuration and live checks. SMS and WhatsApp verification are not enabled.
+
+## Profile setup and Explore
+
+New and existing accounts without a completed profile enter a two-step setup: display name, optional photo/bio, explicit 18+ acknowledgement when needed, then optional interests. Profiles persist in the existing SQLite volume. Client photos are cropped and re-encoded to 256px JPEG; the API caps the request and permits only raster JPG/PNG data with matching signatures. No SVG or remote photo URL is accepted. Editing is authenticated, origin checked and blocked while that account has a live room.
+
+Explore lists real live rooms, with category/search filters and selected interests sorted first. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live has its own setup screen. Room privacy, moderation and media permissions are retained.

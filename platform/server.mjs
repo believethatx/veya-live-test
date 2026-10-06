@@ -7,7 +7,7 @@ import { RoomRegistry } from './rooms.mjs';
 import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
-import { socialAccount, confirmAdult, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
+import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -41,9 +41,9 @@ export function createApp({ media = createMedia() } = {}) {
     for await (const chunk of req) { size += chunk.length; if (size > limit) throw Error('Request too large'); chunks.push(chunk); }
     return Buffer.concat(chunks).toString('utf8');
   }
-  async function jsonBody(req) {
+  async function jsonBody(req, limit = 4096) {
     if (!req.headers['content-type']?.startsWith('application/json')) throw Error('JSON body required');
-    return JSON.parse(await body(req));
+    return JSON.parse(await body(req, limit));
   }
   function json(res, code, value, headers = {}) {
     res.writeHead(code, { ...securityHeaders, 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(value));
@@ -116,6 +116,12 @@ export function createApp({ media = createMedia() } = {}) {
           const user = userFromRequest(req); revokeSession(req);
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');
           json(res, 200, { ok: true }, { 'Set-Cookie': expiredCookie }); return;
+        }
+        if (req.url === '/api/profile') {
+          const user = userFromRequest(req); if (!user) {json(res,401,{error:'Sign in first'});return;}
+          if ([...wss.clients].some(s => s.user.id === user.id && rooms.peer(s))) throw Error('Leave your live room before editing your profile');
+          const updated = saveProfile(user.id, await jsonBody(req, 160000));
+          json(res,200,{user:publicUser(updated)});return;
         }
         if (req.url?.startsWith('/api/admin/')) {
           const user = userFromRequest(req);

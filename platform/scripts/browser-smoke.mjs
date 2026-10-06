@@ -19,12 +19,12 @@ async function account(name, mobile = false) {
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.goto(base); await page.locator('#toggleAccount').click();
   await page.locator('#displayName').fill(name); await page.locator('#adult').check(); await page.locator('#email').fill(`${name}@example.test`); await page.locator('#password').fill('a very long test password'); await page.locator('#submitAccount').click();
-  await page.locator('#discover').waitFor({ state: 'visible' }); return page;
+  await page.locator('#onboarding').waitFor({state:'visible'}); await page.locator('#profileNext').click(); await page.locator('#profileNext').click(); await page.locator('#discover').waitFor({ state: 'visible' }); return page;
 }
 try {
   const host = await account('Host');
   const user = await host.evaluate(async () => (await (await fetch('/api/me')).json()).user); process.env.ADMIN_USER_IDS = user.id;
-  await host.reload(); await host.locator('#title').fill('Browser live test'); await host.locator('#hostRules').check(); await host.locator('#start').click();
+  await host.reload(); await host.locator('#navLive').click(); await host.locator('#title').fill('Browser live test'); await host.locator('#hostRules').check(); await host.locator('#start').click();
   await host.waitForFunction(() => document.getElementById('status').textContent === 'You’re live', null, { timeout: 25000 });
   const viewerA = await account('ViewerA', true), viewerB = await account('ViewerB');
   for (const viewer of [viewerA, viewerB]) {
