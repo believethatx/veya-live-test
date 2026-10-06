@@ -6,12 +6,25 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { RoomRegistry } from './rooms.mjs';
 import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
-import { register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
+import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
+import { socialAccount, confirmAdult, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
   const rooms = new RoomRegistry();
   const attempts = new Map();
+  const oauth = createOAuthFlow();
+  const emailRequests = new Map();
+  const mailLimits = {day: Math.floor(Date.now()/86_400_000), sent:0};
+  async function deliverLink(email,purpose,origin) {
+    const now=Date.now(), day=Math.floor(now/86_400_000);
+    if(mailLimits.day !== day) {mailLimits.day=day;mailLimits.sent=0;}
+    for(const [key,time] of emailRequests) if(now-time > 60_000) emailRequests.delete(key);
+    if(emailRequests.has(email) || mailLimits.sent >= 100) return;
+    emailRequests.set(email,now);mailLimits.sent++;
+    const token=issueAccountToken(email,purpose);
+    if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
+  }
   const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'] };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
@@ -47,8 +60,28 @@ export function createApp({ media = createMedia() } = {}) {
   }
   const server = createServer(async (req, res) => {
     try {
+      const url = new URL(req.url, requestOrigin(req));
+      const authMatch = url.pathname.match(/^\/auth\/(google|facebook)(\/callback)?$/);
+      if (req.method === 'GET' && authMatch) {
+        const provider = authMatch[1];
+        const user = userFromRequest(req);
+        const cookieName = `veya_oauth_${provider}`;
+        const clear = `${cookieName}=; HttpOnly; SameSite=Lax; Path=/auth/${provider}; Max-Age=0${secureRequest(req) ? '; Secure' : ''}`;
+        try {
+          if (!authMatch[2]) {
+            const start = oauth.start(provider, requestOrigin(req), user?.id || null);
+            res.writeHead(302, { ...securityHeaders, Location:start.url, 'Set-Cookie':`${cookieName}=${start.binding}; HttpOnly; SameSite=Lax; Path=/auth/${provider}; Max-Age=600${secureRequest(req) ? '; Secure' : ''}` }); res.end(); return;
+          }
+          const binding = req.headers.cookie?.split(';').map(x => x.trim()).find(x => x.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+          const result = await oauth.finish(provider,url.searchParams.get('state'),binding,url.searchParams.get('code'),user?.id || null);
+          const account = socialAccount(provider,result.subject,result.profile,user);
+          res.writeHead(302,{...securityHeaders,Location:'/', 'Set-Cookie':[clear,sessionCookie(createSession(account.id),secureRequest(req))]});res.end();return;
+        } catch {
+          res.writeHead(302,{...securityHeaders,Location:'/#authError=1','Set-Cookie':clear});res.end();return;
+        }
+      }
       if (req.url === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true, mediaConfigured: media.configured }); return; }
-      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION }); return; }
+      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION, accounts: accountConfig() }); return; }
       if (req.url === '/api/me' && req.method === 'GET') { json(res, 200, { user: publicUser(userFromRequest(req)) }); return; }
       if (req.url === '/api/rooms' && req.method === 'GET') {
         if (!userFromRequest(req)) { json(res, 401, { error: 'Sign in first' }); return; }
@@ -96,13 +129,33 @@ export function createApp({ media = createMedia() } = {}) {
           if (req.url === '/api/admin/review-report') { json(res, 200, { ok: Boolean(resolveReport(user, input.reportId)) }); return; }
           json(res, 404, { error: 'Not found' }); return;
         }
-        if (!['/api/register', '/api/login'].includes(req.url)) { json(res, 404, { error: 'Not found' }); return; }
+        if (!['/api/register', '/api/login', '/api/account/adult', '/api/account/send-verification', '/api/account/forgot-password', '/api/account/verify', '/api/account/reset-password'].includes(req.url)) { json(res, 404, { error: 'Not found' }); return; }
         const ip = req.socket.remoteAddress || 'unknown';
         const history = (attempts.get(ip) || []).filter(time => Date.now() - time < 60_000);
         if (history.length >= 8) { json(res, 429, { error: 'Too many attempts. Wait a minute.' }); return; }
         history.push(Date.now()); attempts.set(ip, history);
         const input = await jsonBody(req);
+        if (req.url === '/api/account/adult') {
+          const user = userFromRequest(req); if (!user || input.adult !== true) throw Error('Confirm you are 18 or older');
+          json(res,200,{user:publicUser(confirmAdult(user.id))});return;
+        }
+        if (req.url === '/api/account/send-verification' || req.url === '/api/account/forgot-password') {
+          if (!accountConfig().email) throw Error('Email delivery is not connected yet');
+          const purpose = req.url.endsWith('forgot-password') ? 'reset' : 'verify';
+          const user = userFromRequest(req);
+          if (purpose === 'verify' && !user) { json(res,401,{error:'Sign in first'});return; }
+          const email = purpose === 'verify' ? user.email : String(input.email || '').trim().toLowerCase();
+          // Same response for unknown, verified, throttled and existing addresses.
+          await deliverLink(email,purpose,requestOrigin(req));
+          json(res,200,{ok:true,message:'If eligible, a link has been sent. Check your inbox and spam folder.'});return;
+        }
+        if (req.url === '/api/account/verify' || req.url === '/api/account/reset-password') {
+          const purpose = req.url.endsWith('reset-password') ? 'reset' : 'verify';
+          consumeAccountToken(input.token,purpose,input.password);
+          json(res,200,{ok:true});return;
+        }
         const user = req.url === '/api/register' ? register(input) : login(input);
+        if (req.url === '/api/register' && accountConfig().email) await deliverLink(user.email,'verify',requestOrigin(req));
         json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(createSession(user.id), secureRequest(req)) }); return;
       }
       const path = req.url?.split('?')[0];
@@ -114,6 +167,7 @@ export function createApp({ media = createMedia() } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   server.on('upgrade', (req, socket, head) => {
     const user = userFromRequest(req);
+    if (user && (!user.adult || (accountConfig().email && !user.emailVerified))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     if (req.url !== '/signal' || req.headers.origin !== requestOrigin(req) || !user) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, ws => { ws.user = user; ws.request = req; wss.emit('connection', ws); });
   });

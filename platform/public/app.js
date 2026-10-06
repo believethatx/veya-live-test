@@ -144,8 +144,8 @@ $('toggleAccount').onclick = () => {
 };
 const linkedRoom = new URLSearchParams(location.search).get('room');
 async function showSignedIn(user) {
-  currentUser = user; $('account').hidden = true; $('discover').hidden = false; $('who').textContent = user.displayName; $('openAdmin').hidden = !user.admin;
-  await refreshRooms(); if (linkedRoom && !activeRoom) requestJoin(linkedRoom);
+  currentUser = user; updateAccount(user); $('account').hidden = true; $('discover').hidden = false; $('who').textContent = user.displayName; $('openAdmin').hidden = !user.admin;
+  await refreshRooms(); if (linkedRoom && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)) requestJoin(linkedRoom);
 }
 $('accountForm').onsubmit = async event => {
   event.preventDefault(); notice(''); $('submitAccount').disabled = true;
@@ -176,7 +176,37 @@ $('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave y
 $('closeAdmin').onclick = () => { $('admin').hidden = true; $('discover').hidden = false; refreshRooms(); };
 $('videoStage').oncontextmenu = event => event.preventDefault();
 window.addEventListener('pagehide', cleanup);
-try { config = await api('/api/config'); $('start').disabled = !config.mediaConfigured; $('setupState').textContent = config.mediaConfigured ? 'Your camera and microphone are checked before the room goes live.' : 'Live video is not connected yet. Hosting setup is pending.'; const { user } = await api('/api/me'); if (user) await showSignedIn(user); }
-catch { notice('Could not reach Veya. Try again shortly.'); }
 setInterval(() => { if (currentUser && !$('discover').hidden) refreshRooms(); }, 10000);
 setInterval(updateWatermark, 1000);
+
+const accountLink = new URLSearchParams(location.hash.slice(1));
+const linkToken = accountLink.get('token');
+function updateAccount(user) {
+  $('emailStatus').textContent = user.emailVerified ? 'Email verified' : config.accounts?.email ? 'Verify your email before joining or hosting lives.' : 'Email delivery setup is pending.';
+  $('sendVerification').hidden = Boolean(user.emailVerified || !config.accounts?.email);
+  $('adultConfirm').hidden = Boolean(user.adult); $('confirmAdult').hidden = Boolean(user.adult);
+  $('start').disabled = !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
+  if (!user.adult || (config.accounts?.email && !user.emailVerified)) $('emailStatus').closest('details').open = true;
+}
+for (const button of document.querySelectorAll('[data-provider]')) button.onclick = () => { location.href = `/auth/${button.dataset.provider}`; };
+$('sendVerification').onclick = async () => { $('sendVerification').disabled = true; try { const result = await api('/api/account/send-verification',{}); notice(result.message); } catch (e) { notice(e.message); } finally { $('sendVerification').disabled = false; } };
+$('confirmAdult').onclick = async () => { try { const {user} = await api('/api/account/adult',{adult:$('socialAdult').checked}); await showSignedIn(user); $('start').disabled = !config.mediaConfigured || (config.accounts?.email && !user.emailVerified); } catch(e) {notice(e.message);} };
+$('forgotPassword').onclick = async () => { if (!$('email').value) {notice('Enter your email address first.');$('email').focus();return;} $('forgotPassword').disabled=true; try {const result=await api('/api/account/forgot-password',{email:$('email').value});notice(result.message);}catch(e){notice(e.message);}finally{$('forgotPassword').disabled=false;} };
+$('recoveryForm').onsubmit = async event => {event.preventDefault();const button=$('recoveryForm').querySelector('button');button.disabled=true;try{await api('/api/account/reset-password',{token:linkToken,password:$('newPassword').value});location.replace('/#passwordReset=1');location.reload();}catch(e){notice(e.message);}finally{button.disabled=false;} };
+
+try {
+  config = await api('/api/config');
+  for (const button of document.querySelectorAll('[data-provider]')) button.hidden = !config.accounts?.[button.dataset.provider];
+  $('socialSignIn').hidden = !config.accounts?.google && !config.accounts?.facebook;
+  $('forgotPassword').hidden = !config.accounts?.email;
+  $('accountStatus').textContent = config.accounts?.email ? 'New accounts must verify their email before joining live rooms.' : 'Private development build. Email delivery setup is pending.';
+  $('start').disabled = !config.mediaConfigured;
+  $('setupState').textContent = config.mediaConfigured ? 'Your camera and microphone are checked before the room goes live.' : 'Live video is not connected yet. Hosting setup is pending.';
+  if (accountLink.get('action') === 'verify' && linkToken) {
+    history.replaceState(null,'','/'); await api('/api/account/verify',{token:linkToken}); notice('Email verified. You can sign in now.');
+  } else if (accountLink.get('action') === 'reset' && linkToken) {
+    history.replaceState(null,'','/'); $('account').hidden=true; $('recovery').hidden=false;
+  } else if (accountLink.has('authError')) {history.replaceState(null,'','/');notice('Social sign-in did not complete. Try again, or sign in with email and connect the provider in Account settings.');}
+  else if (accountLink.has('passwordReset')) {history.replaceState(null,'','/');notice('Password updated. Sign in with your new password.');}
+  if (!$('recovery').hidden) {} else { const {user}=await api('/api/me'); if(user) await showSignedIn(user); }
+} catch(e) {notice(e.message || 'Could not reach Veya. Try again shortly.');}

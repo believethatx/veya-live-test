@@ -15,9 +15,12 @@ db.exec(`PRAGMA journal_mode=WAL;
   CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL
   );`);
-const sessions = db.prepare('SELECT u.id, u.email, u.display_name AS displayName FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?');
+if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'email_verified')) db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0');
+db.exec(`CREATE TABLE IF NOT EXISTS identities (provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(provider,subject));
+CREATE TABLE IF NOT EXISTS account_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, purpose TEXT NOT NULL, expires_at INTEGER NOT NULL);`);
+const sessions = db.prepare('SELECT u.id, u.email, u.display_name AS displayName, u.email_verified, u.adult_ack FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?');
 const tokenHash = token => createHash('sha256').update(token).digest('hex');
-const publicUser = row => ({ id: row.id, email: row.email, displayName: row.displayName });
+const publicUser = row => ({ id: row.id, email: row.email, displayName: row.displayName, emailVerified: Boolean(row.email_verified), adult: Boolean(row.adult_ack) });
 const validEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
 
 export function register(input) {
@@ -38,11 +41,11 @@ export function register(input) {
     if (String(error).includes('UNIQUE')) throw Error('Email is already registered');
     throw error;
   }
-  return user;
+  return { ...user, emailVerified: false, adult: true };
 }
 export function login(input) {
   const email = String(input.email ?? '').trim().toLowerCase();
-  const row = db.prepare('SELECT id,email,display_name AS displayName,salt,password_hash FROM users WHERE email=?').get(email);
+  const row = db.prepare('SELECT id,email,display_name AS displayName,email_verified,adult_ack,salt,password_hash FROM users WHERE email=?').get(email);
   const password = String(input.password ?? '');
   const actual = scryptSync(password, row?.salt ?? 'invalid-login-salt', 64);
   const expected = Buffer.from(row?.password_hash ?? '0'.repeat(128), 'hex');
@@ -71,3 +74,50 @@ export function sessionCookie(token, secure) {
   return `veya_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure ? '; Secure' : ''}`;
 }
 export const expiredCookie = 'veya_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
+
+const userById = id => { const row = db.prepare('SELECT id,email,display_name AS displayName,email_verified,adult_ack FROM users WHERE id=?').get(id); return row ? publicUser(row) : null; };
+export function confirmAdult(id) { db.prepare('UPDATE users SET adult_ack=1 WHERE id=?').run(id); return userById(id); }
+export function socialAccount(provider, subject, profile, existingUser = null) {
+  if (!['google', 'facebook'].includes(provider) || typeof subject !== 'string' || !subject.length || subject.length > 255) throw Error('Invalid social account');
+  const identity = db.prepare('SELECT user_id FROM identities WHERE provider=? AND subject=?').get(provider, subject);
+  if (identity) { if (existingUser && existingUser.id !== identity.user_id) throw Error('This social account is connected to another Veya account'); return userById(identity.user_id); }
+  if (existingUser) { db.prepare('INSERT INTO identities VALUES (?,?,?)').run(provider, subject, existingUser.id); return userById(existingUser.id); }
+  const email = String(profile.email || '').trim().toLowerCase();
+  if (!validEmail(email)) throw Error('An email address is required. Use email sign-up or grant email access.');
+  if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) throw Error('Sign in to your existing Veya account first, then connect this provider in Account settings.');
+  const id = randomBytes(16).toString('hex');
+  const name = String(profile.name || 'Veya member').trim().slice(0,40) || 'Veya member';
+  const salt = randomBytes(16).toString('hex');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('INSERT INTO users (id,email,display_name,salt,password_hash,adult_ack,created_at,email_verified) VALUES (?,?,?,?,?,?,?,?)').run(id,email,name,salt,scryptSync(randomBytes(32),salt,64).toString('hex'),0,new Date().toISOString(),provider === 'google' && profile.email_verified === true ? 1 : 0);
+    db.prepare('INSERT INTO identities VALUES (?,?,?)').run(provider,subject,id); db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return userById(id);
+}
+export function issueAccountToken(email, purpose) {
+  if (!['verify', 'reset'].includes(purpose)) throw Error('Invalid token purpose');
+  const user = db.prepare('SELECT id,email_verified FROM users WHERE email=?').get(String(email || '').trim().toLowerCase());
+  if (!user || (purpose === 'verify' && user.email_verified)) return null;
+  const token = randomBytes(32).toString('hex');
+  db.prepare('DELETE FROM account_tokens WHERE user_id=? AND purpose=?').run(user.id,purpose);
+  db.prepare('INSERT INTO account_tokens VALUES (?,?,?,?)').run(tokenHash(token),user.id,purpose,Date.now() + (purpose === 'reset' ? 30 : 60) * 60_000);
+  return token;
+}
+export function consumeAccountToken(token, purpose, password) {
+  if (!/^[0-9a-f]{64}$/.test(String(token))) throw Error('This link is invalid or expired');
+  if (purpose === 'reset' && (typeof password !== 'string' || password.length < 12 || password.length > 128)) throw Error('Use a password of 12 to 128 characters');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row = db.prepare('SELECT user_id FROM account_tokens WHERE token_hash=? AND purpose=? AND expires_at>?').get(tokenHash(token),purpose,Date.now());
+    if (!row) throw Error('This link is invalid or expired');
+    if (purpose === 'verify') db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(row.user_id);
+    else if (purpose === 'reset') {
+      const salt = randomBytes(16).toString('hex');
+      db.prepare('UPDATE users SET salt=?,password_hash=? WHERE id=?').run(salt,scryptSync(password,salt,64).toString('hex'),row.user_id);
+      db.prepare('DELETE FROM sessions WHERE user_id=?').run(row.user_id);
+    } else throw Error('Invalid token purpose');
+    db.prepare('DELETE FROM account_tokens WHERE user_id=? AND purpose=?').run(row.user_id,purpose);
+    db.exec('COMMIT'); return userById(row.user_id);
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}

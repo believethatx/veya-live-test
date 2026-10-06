@@ -42,3 +42,17 @@ A future native Android client can use `FLAG_SECURE`; a future iOS client can re
 `scripts/browser-smoke.mjs` exercises the complete UI against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). `bash scripts/media-ci.sh` downloads the pinned server, verifies its checksum and runs that check. The full check passed on GitHub Actions, including video to two viewers, chat, reporting, removal and cleanup. It does not record media or screenshot live streams. See `VALIDATION.md` for the exact tested scope.
 
 This is not a finished public social app. Remaining: deployed media/backend connections and cross-network phone verification; email verification/recovery and meaningful age checks; complete profile/follow/discovery features; persistent bans and full moderation workflow; PK/cohosting; gifts/coin ledger, payments and payouts with server-side reconciliation. There is no simulated money or fake live activity in this build.
+
+## Account provider setup (Veya only)
+
+Google and Facebook are implemented but hidden until their Veya credentials are configured. Existing email accounts remain usable. A social identity is never linked just because its email matches: sign in to the existing account and use Account settings to connect the provider. New social accounts must explicitly acknowledge being 18+. This is acknowledgement, not age verification.
+
+Google: create a Web application OAuth client in a separate Veya Google Cloud project, with `openid email profile` scopes. Authorized redirect URI: `https://veya-backend-development.up.railway.app/auth/google/callback`. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` privately in the Veya Railway service. Configure consent-screen audience/test users before external use.
+
+Facebook: create a separate Veya Meta developer app with Facebook Login. Redirect URI: `https://veya-backend-development.up.railway.app/auth/facebook/callback`. Set `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, and the supported `FACEBOOK_API_VERSION` shown in your app dashboard. Request only public profile and email. Meta's app-mode, permission, privacy-policy and deletion requirements must be completed before opening it to everyone. No tokens are stored or exposed to the frontend.
+
+Email: set separate `RESEND_API_KEY` and `EMAIL_FROM` values using a verified Veya sender. Delivery is not active until configured. Resend's test sender can only send to the account owner's address; general delivery needs a verified sender domain, which has not been purchased or configured. Do not use TLOU's account, keys, or domain. Once email delivery is enabled, unverified accounts cannot enter live rooms. Google-verified email is accepted; Facebook email is not automatically treated as verified. Existing email accounts also need to verify.
+
+Verification and reset links have one-use hashed tokens, expire after 60/30 minutes, and reset revokes all sessions. Link tokens are in the URL fragment and cleared before further navigation. Send requests return the same message for unknown accounts. Delivery has a per-address cooldown and 100-request daily guard per running instance; this is not a provider billing cap. Provider callbacks use browser-bound, one-use state, with PKCE and nonce validation for Google.
+
+Status: automated security and local browser checks cover code behavior. Real Google/Facebook sign-in and email delivery still require credentials and live provider checks. SMS and WhatsApp verification are not enabled.

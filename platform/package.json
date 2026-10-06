@@ -12,6 +12,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "google-auth-library": "^11.1.0",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.1",
     "ws": "^8.18.3"
