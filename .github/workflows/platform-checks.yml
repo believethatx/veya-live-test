@@ -1,0 +1,27 @@
+name: Platform checks
+on:
+  push:
+    branches: [development]
+    paths: ['platform/**', '.github/workflows/platform-checks.yml']
+  pull_request:
+    paths: ['platform/**', '.github/workflows/platform-checks.yml']
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/ui-smoke.mjs

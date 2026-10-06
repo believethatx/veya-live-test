@@ -1,147 +1,181 @@
+import { Room, RoomEvent, Track, createLocalTracks } from '/livekit.js';
 const $ = id => document.getElementById(id);
-let socket, connection, localStream, activeRoom, role, currentUser, registering = false;
-let pendingCandidates = [];
-const send = msg => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg)); };
+let socket, liveRoom, localTracks = [], activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
+let config = { mediaConfigured: false, policyVersion: '' };
 const status = text => { $('status').textContent = text; };
 const notice = text => { $('notice').textContent = text; };
-const showRoom = (title, asHost) => {
-  $('discover').hidden = true; $('room').hidden = false; $('roomTitle').textContent = title;
-  $('local').hidden = !asHost; $('remote').hidden = asHost;
-  $('invite').hidden = !asHost; $('mute').hidden = !asHost;
-};
+const send = msg => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg)); };
+async function api(path, input) {
+  const response = await fetch(path, input === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
+}
 async function refreshRooms() {
-  if (activeRoom) return;
+  if (activeRoom || !currentUser) return;
   try {
-    const response = await fetch('/api/rooms', { cache: 'no-store' });
-    if (!response.ok) throw Error('Rooms unavailable');
-    const { rooms } = await response.json();
-    $('rooms').replaceChildren();
-    if (!rooms.length) { $('rooms').textContent = 'No one is live right now.'; return; }
+    const { rooms } = await api('/api/rooms'); $('rooms').replaceChildren();
+    if (!rooms.length) { $('rooms').className = 'empty'; $('rooms').textContent = 'No one is live yet. Start the first conversation.'; return; }
+    $('rooms').className = '';
     for (const room of rooms) {
       const button = document.createElement('button'); button.className = 'room-item';
       const name = document.createElement('strong'); name.textContent = room.title;
-      const detail = document.createElement('small'); detail.textContent = `${room.hostName} · ${room.category} · ${room.viewers} viewer${room.viewers === 1 ? '' : 's'}`;
-      button.append(name, detail); button.onclick = () => join(room.id);
-      $('rooms').append(button);
+      const detail = document.createElement('small'); detail.textContent = `${room.hostName} · ${room.category} · ${room.viewers} viewers`;
+      button.append(name, detail); button.onclick = () => requestJoin(room.id); $('rooms').append(button);
     }
-  } catch { $('rooms').textContent = 'Could not load rooms. Try again shortly.'; }
+  } catch (error) { $('rooms').textContent = error.message; }
 }
-function makeConnection() {
-  connection?.close();
-  pendingCandidates = [];
-  connection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-  connection.onicecandidate = event => { if (event.candidate) send({ type: 'signal', data: { type: 'candidate', candidate: event.candidate } }); };
-  connection.ontrack = event => { $('remote').srcObject = event.streams[0]; status('Connected to the host'); };
-  connection.onconnectionstatechange = () => {
-    if (connection?.connectionState === 'failed' || connection?.connectionState === 'disconnected') status('Connection interrupted. Rejoin if it does not recover.');
-    if (connection?.connectionState === 'connected') status(role === 'host' ? 'Viewer connected' : 'Connected to the host');
-  };
-  if (role === 'host') localStream.getTracks().forEach(track => connection.addTrack(track, localStream));
-  else { connection.addTransceiver('video', { direction: 'recvonly' }); connection.addTransceiver('audio', { direction: 'recvonly' }); }
+function requestJoin(id) { if (busy || activeRoom) return; pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
+function updateWatermark() {
+  if (!activeRoom) return;
+  $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
 }
-async function signal(data) {
-  if (!connection) makeConnection();
-  if (data.type === 'offer') {
-    await connection.setRemoteDescription(data.description);
-    for (const candidate of pendingCandidates.splice(0)) await connection.addIceCandidate(candidate);
-    const answer = await connection.createAnswer(); await connection.setLocalDescription(answer);
-    send({ type: 'signal', data: { type: 'answer', description: connection.localDescription } });
-  } else if (data.type === 'answer') {
-    await connection.setRemoteDescription(data.description);
-    for (const candidate of pendingCandidates.splice(0)) await connection.addIceCandidate(candidate);
-  } else if (data.type === 'candidate') {
-    if (connection.remoteDescription) await connection.addIceCandidate(data.candidate);
-    else pendingCandidates.push(data.candidate);
+function showRoom(room) {
+  $('discover').hidden = true; $('room').hidden = false; $('roomTitle').textContent = room.title;
+  $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
+  $('viewersPanel').hidden = role !== 'host'; $('leave').textContent = role === 'host' ? 'End live' : 'Leave';
+  $('mute').textContent = 'Mute mic'; $('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';
+  updateWatermark();
+}
+async function attachMedia(credentials, roomInfo) {
+  const room = new Room({ adaptiveStream: true, dynacast: true }); liveRoom = room;
+  room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (participant.identity !== roomInfo.hostId) return;
+    if (track.kind === Track.Kind.Video) track.attach($('remote'));
+    if (track.kind === Track.Kind.Audio) { track.attach($('remoteAudio')); $('hearAudio').hidden = room.canPlaybackAudio; }
+  });
+  room.on(RoomEvent.AudioPlaybackStatusChanged, () => { $('hearAudio').hidden = role === 'host' || room.canPlaybackAudio; });
+  room.on(RoomEvent.Reconnecting, () => status('Reconnecting to the live…'));
+  room.on(RoomEvent.Reconnected, () => status(role === 'host' ? 'You’re live' : 'Watching live'));
+  room.on(RoomEvent.Disconnected, () => { if (liveRoom === room && activeRoom) { cleanup(); notice('The live connection ended.'); } });
+  await room.connect(credentials.url, credentials.token);
+  if (liveRoom !== room || !activeRoom) { await room.disconnect(); throw Error('Room closed'); }
+  if (role === 'host') {
+    for (const track of localTracks) { await room.localParticipant.publishTrack(track, { source: track.kind === Track.Kind.Video ? Track.Source.Camera : Track.Source.Microphone }); if (track.kind === Track.Kind.Video) track.attach($('local')); }
+  } else {
+    for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
+      if (participant.identity === roomInfo.hostId && publication.track) publication.track.attach(publication.track.kind === Track.Kind.Video ? $('remote') : $('remoteAudio'));
+    }
+    try { await room.startAudio(); } catch { $('hearAudio').hidden = false; }
   }
+  send({ type: 'ready' });
 }
 function connect(firstMessage) {
   return new Promise((resolve, reject) => {
-    socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/signal`);
-    socket.onopen = () => send(firstMessage);
-    socket.onmessage = async event => {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/signal`); socket = ws;
+    let settled = false;
+    const timeout = setTimeout(() => { if (!settled) { settled = true; reject(Error('The room took too long to connect.')); cleanup(); } }, 20000);
+    const fail = message => { clearTimeout(timeout); if (!settled) { settled = true; reject(Error(message)); } else notice(message); };
+    ws.onopen = () => ws.send(JSON.stringify(firstMessage));
+    ws.onmessage = async event => {
+      if (socket !== ws) return;
       const msg = JSON.parse(event.data);
-      if (msg.type === 'error') { notice(msg.message); if (!activeRoom) reject(Error(msg.message)); return; }
+      if (msg.type === 'error') { fail(msg.message); return; }
       if (msg.type === 'created' || msg.type === 'joined') {
-        activeRoom = msg.room.id; history.replaceState(null, '', msg.type === 'joined' ? `?room=${encodeURIComponent(activeRoom)}` : location.pathname);
-        showRoom(msg.room.title, role === 'host'); status(role === 'host' ? 'Waiting for a viewer' : 'Connecting to the host…'); resolve();
+        activeRoom = msg.room.id; history.replaceState(null, '', `?room=${encodeURIComponent(activeRoom)}`); showRoom(msg.room); status('Connecting live video…');
+        try { await attachMedia(msg.media, msg.room); } catch (error) { fail(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : 'Could not connect live video. Try again.'); cleanup(); }
       }
-      if (msg.type === 'peer-joined') {
-        makeConnection(); const offer = await connection.createOffer(); await connection.setLocalDescription(offer);
-        send({ type: 'signal', data: { type: 'offer', description: connection.localDescription } });
-      }
-      if (msg.type === 'signal') { try { await signal(msg.data); } catch { status('Video connection failed. Leave and rejoin.'); } }
+      if (msg.type === 'ready') { clearTimeout(timeout); settled = true; status(role === 'host' ? 'You’re live' : 'Watching live'); resolve(); }
       if (msg.type === 'chat') {
-        const item = document.createElement('li'); item.textContent = `${msg.name}: ${msg.text}`;
-        $('chatLog').append(item); $('chatLog').scrollTop = $('chatLog').scrollHeight;
+        const item = document.createElement('li'); const name = document.createElement('span'); name.className = 'chat-name'; name.textContent = msg.name;
+        item.append(name, document.createTextNode(msg.text)); $('chatLog').append(item);
+        if ($('chatLog').children.length > 100) $('chatLog').firstChild.remove(); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
-      if (msg.type === 'peer-left') { connection?.close(); connection = null; status('Viewer left. Waiting for another viewer.'); }
-      if (msg.type === 'ended') { cleanup(); notice('The host ended this room.'); }
+      if (msg.type === 'viewers') $('viewerCount').textContent = msg.count;
+      if (msg.type === 'roster') {
+        $('viewerList').replaceChildren();
+        if (!msg.viewers.length) $('viewerList').textContent = 'Waiting for your first viewer.';
+        for (const viewer of msg.viewers) {
+          const row = document.createElement('div'); row.className = 'viewer'; const name = document.createElement('span'); name.textContent = viewer.name;
+          const button = document.createElement('button'); button.className = 'btn danger'; button.textContent = 'Remove'; button.onclick = () => send({ type: 'kick', userId: viewer.id }); row.append(name, button); $('viewerList').append(row);
+        }
+      }
+      if (msg.type === 'reported') { $('reportDialog').close(); notice('Report received. Thank you for helping keep Veya safe.'); }
+      if (msg.type === 'ended') { fail(msg.message); cleanup(); notice(msg.message); }
     };
-    socket.onerror = () => { notice('Could not reach the room service.'); if (!activeRoom) reject(Error('Connection failed')); };
-    socket.onclose = () => { if (activeRoom) { cleanup(); notice('Connection ended.'); } };
+    ws.onerror = () => fail('Could not reach the live room service.');
+    ws.onclose = () => { clearTimeout(timeout); if (socket !== ws) return; fail('The room connection ended.'); cleanup(); };
   });
 }
 function cleanup() {
-  activeRoom = null; connection?.close(); connection = null;
-  localStream?.getTracks().forEach(track => track.stop()); localStream = null;
-  if (socket?.readyState === WebSocket.OPEN) socket.close(); socket = null;
-  $('local').srcObject = null; $('remote').srcObject = null; $('room').hidden = true; $('discover').hidden = false;
+  activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
+  for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
+  const ws = socket; socket = null; ws?.close();
+  for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
+  $('room').hidden = true; $('discover').hidden = !currentUser; $('hearAudio').hidden = true;
+  $('reportDialog').close(); $('joinDialog').close(); $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
-async function join(id) {
-  notice(''); role = 'viewer';
-  try { await connect({ type: 'join', roomId: id }); } catch { cleanup(); }
-}
 $('start').onclick = async () => {
-  notice(''); $('start').disabled = true;
+  if (busy) return; notice('');
+  if (!$('hostRules').checked) { notice('Accept the room privacy rules before going live.'); return; }
+  if (!config.mediaConfigured) { notice('Live video setup is still pending.'); return; }
+  busy = true; $('start').disabled = true; role = 'host';
   try {
     if ($('title').value.trim().length < 3) throw Error('Enter a room title of at least 3 characters.');
-    localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
-    $('local').srcObject = localStream; role = 'host';
-    await connect({ type: 'create', title: $('title').value, category: $('category').value });
-  } catch (error) { localStream?.getTracks().forEach(track => track.stop()); localStream = null; notice(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : error.message); }
-  finally { $('start').disabled = false; }
+    localTracks = await createLocalTracks({ audio: true, video: { facingMode: 'user', resolution: { width: 640, height: 480, frameRate: 24 } } });
+    await connect({ type: 'create', title: $('title').value, category: $('category').value, acceptRules: true, policyVersion: config.policyVersion });
+  } catch (error) { cleanup(); notice(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : error.message); }
+  finally { busy = false; $('start').disabled = !config.mediaConfigured; }
+};
+$('cancelJoin').onclick = () => $('joinDialog').close();
+$('confirmJoin').onclick = async () => {
+  if (!$('viewerRules').checked) { notice('Accept the room privacy rules before joining.'); return; }
+  if (busy) return; busy = true; role = 'viewer'; $('joinDialog').close(); notice('');
+  try { await connect({ type: 'join', roomId: pendingRoom, acceptRules: true, policyVersion: config.policyVersion }); }
+  catch (error) { cleanup(); notice(error.message); } finally { busy = false; }
 };
 $('share').onclick = async () => {
   const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(activeRoom)}`;
-  try { await navigator.clipboard.writeText(url); status('Invite link copied'); }
-  catch { status(url); }
+  try { if (navigator.share) await navigator.share({ title: 'Join me on Veya', url }); else { await navigator.clipboard.writeText(url); notice('Invite link copied.'); } }
+  catch (error) { if (error.name !== 'AbortError') notice(url); }
 };
-$('mute').onclick = () => {
-  const tracks = localStream?.getAudioTracks() ?? []; if (!tracks.length) return;
-  tracks.forEach(t => t.enabled = !t.enabled); $('mute').textContent = tracks[0].enabled ? 'Mute mic' : 'Unmute mic';
-};
+$('mute').onclick = async () => { const track = localTracks.find(t => t.kind === Track.Kind.Audio); if (!track) return; await (track.isMuted ? track.unmute() : track.mute()); $('mute').textContent = track.isMuted ? 'Unmute mic' : 'Mute mic'; };
+$('hearAudio').onclick = async () => { await liveRoom?.startAudio(); $('hearAudio').hidden = true; };
 $('leave').onclick = cleanup;
 $('chatForm').onsubmit = event => { event.preventDefault(); send({ type: 'chat', text: $('chatText').value }); $('chatText').value = ''; };
-const linkedRoom = new URLSearchParams(location.search).get('room');
+$('openReport').onclick = () => { $('reportDetails').value = ''; $('reportDialog').showModal(); };
+$('cancelReport').onclick = () => $('reportDialog').close();
+$('reportForm').onsubmit = event => { event.preventDefault(); send({ type: 'report', reason: $('reportReason').value, details: $('reportDetails').value }); };
 $('toggleAccount').onclick = () => {
   registering = !registering; $('registerFields').hidden = !registering;
-  $('formTitle').textContent = registering ? 'Create account' : 'Sign in';
-  $('submitAccount').textContent = registering ? 'Create account' : 'Sign in';
-  $('toggleAccount').textContent = registering ? 'Sign in instead' : 'Create account instead';
-  $('password').autocomplete = registering ? 'new-password' : 'current-password';
+  $('displayName').required = registering; $('adult').required = registering;
+  $('formTitle').textContent = registering ? 'Create your account' : 'Sign in'; $('submitAccount').textContent = registering ? 'Create account' : 'Sign in';
+  $('toggleAccount').textContent = registering ? 'Sign in instead' : 'Create account'; $('password').autocomplete = registering ? 'new-password' : 'current-password';
 };
+const linkedRoom = new URLSearchParams(location.search).get('room');
 async function showSignedIn(user) {
-  currentUser = user; $('account').hidden = true; $('discover').hidden = false;
-  $('who').textContent = user.displayName;
-  if (linkedRoom && !activeRoom) join(linkedRoom); else refreshRooms();
+  currentUser = user; $('account').hidden = true; $('discover').hidden = false; $('who').textContent = user.displayName; $('openAdmin').hidden = !user.admin;
+  await refreshRooms(); if (linkedRoom && !activeRoom) requestJoin(linkedRoom);
 }
 $('accountForm').onsubmit = async event => {
   event.preventDefault(); notice(''); $('submitAccount').disabled = true;
   try {
-    const path = registering ? '/api/register' : '/api/login';
-    const payload = { email: $('email').value, password: $('password').value };
-    if (registering) { payload.displayName = $('displayName').value; payload.adult = $('adult').checked; }
-    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const data = await response.json(); if (!response.ok) throw Error(data.error);
-    $('password').value = ''; await showSignedIn(data.user);
-  } catch (error) { notice(error.message); }
-  finally { $('submitAccount').disabled = false; }
+    const input = { email: $('email').value, password: $('password').value };
+    if (registering) { input.displayName = $('displayName').value; input.adult = $('adult').checked; }
+    const { user } = await api(registering ? '/api/register' : '/api/login', input); $('password').value = ''; await showSignedIn(user);
+  } catch (error) { notice(error.message); } finally { $('submitAccount').disabled = false; }
 };
-$('logout').onclick = async () => {
-  await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  currentUser = null; $('discover').hidden = true; $('account').hidden = false; notice('Signed out.');
-};
-try { const response = await fetch('/api/me'); const { user } = await response.json(); if (user) showSignedIn(user); }
-catch { notice('Could not check your account.'); }
-setInterval(() => { if (currentUser) refreshRooms(); }, 10000);
+$('logout').onclick = async () => { try { await api('/api/logout', {}); currentUser = null; cleanup(); $('admin').hidden = true; $('account').hidden = false; $('openAdmin').hidden = true; notice('Signed out.'); } catch (error) { notice(error.message); } };
+async function loadReports() {
+  const { reports } = await api('/api/admin/reports'); $('reports').replaceChildren();
+  if (!reports.length) $('reports').textContent = 'No reports yet.';
+  for (const report of reports) {
+    const item = document.createElement('div'); item.className = 'report-item';
+    const heading = document.createElement('h2'); heading.textContent = report.reason;
+    const description = document.createElement('p'); description.textContent = `${report.host_name} · ${report.room_title} · ${report.status}`;
+    const details = document.createElement('p'); details.textContent = report.details || 'No extra details';
+    const actions = document.createElement('div'); actions.className = 'row';
+    const end = document.createElement('button'); end.className = 'btn danger'; end.textContent = 'End room';
+    end.onclick = async () => { try { await api('/api/admin/end-room', { roomId: report.room_id }); notice('Room ended by moderation.'); } catch (error) { notice(error.message); } };
+    const review = document.createElement('button'); review.className = 'btn secondary'; review.textContent = 'Mark reviewed'; review.disabled = report.status === 'reviewed';
+    review.onclick = async () => { try { await api('/api/admin/review-report', { reportId: report.id }); await loadReports(); } catch (error) { notice(error.message); } };
+    actions.append(end, review); item.append(heading, description, details, actions); $('reports').append(item);
+  }
+}
+$('openAdmin').onclick = async () => { if (activeRoom || busy) { notice('Leave your room before opening moderation.'); return; } try { await loadReports(); $('discover').hidden = true; $('admin').hidden = false; } catch (error) { notice(error.message); } };
+$('closeAdmin').onclick = () => { $('admin').hidden = true; $('discover').hidden = false; refreshRooms(); };
+$('videoStage').oncontextmenu = event => event.preventDefault();
+window.addEventListener('pagehide', cleanup);
+try { config = await api('/api/config'); $('start').disabled = !config.mediaConfigured; $('setupState').textContent = config.mediaConfigured ? 'Your camera and microphone are checked before the room goes live.' : 'Live video is not connected yet. Hosting setup is pending.'; const { user } = await api('/api/me'); if (user) await showSignedIn(user); }
+catch { notice('Could not reach Veya. Try again shortly.'); }
+setInterval(() => { if (currentUser && !$('discover').hidden) refreshRooms(); }, 10000);
+setInterval(updateWatermark, 1000);

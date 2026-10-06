@@ -1,0 +1,24 @@
+// Checks real account UI and honest unconfigured-media behavior. No media adapter.
+import { chromium } from 'playwright';
+import { strict as assert } from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory = mkdtempSync(join(tmpdir(), 'veya-ui-')); process.env.DATA_FILE = join(directory, 'test.sqlite');
+const { createApp } = await import('../server.mjs'); const { createMedia } = await import('../media.mjs');
+const { server } = createApp({ media: createMedia({}) }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const browser = await chromium.launch({ headless: true });
+try {
+  const errors = [];
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
+    const context = await browser.newContext({ viewport }); const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.locator('#toggleAccount').click(); await page.locator('#displayName').fill('UI tester'); await page.locator('#adult').check(); await page.locator('#email').fill(`ui-${viewport.width}@example.test`); await page.locator('#password').fill('a long test password'); await page.locator('#submitAccount').click(); await page.locator('#discover').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#start').isDisabled(), true); assert.match(await page.locator('#setupState').textContent(), /not connected/);
+    assert.equal(await page.locator('.room-item').count(), 0); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.locator('#logout').click(); await page.locator('#account').waitFor({ state: 'visible' });
+    await page.locator('#toggleAccount').click(); await page.locator('#email').fill(`ui-${viewport.width}@example.test`); await page.locator('#password').fill('a long test password'); await page.locator('#submitAccount').click(); await page.locator('#discover').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#openAdmin').isVisible(), false); await context.close();
+  }
+  assert.deepEqual(errors, []); console.log('PASS: desktop/mobile account UI, no overflow, no fake live, sign-out and sign-in');
+} finally { await browser.close(); await new Promise(resolve => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); }
