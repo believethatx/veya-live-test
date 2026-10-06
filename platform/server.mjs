@@ -1,3 +1,4 @@
+import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
 import {publicProfile,people,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
 import {accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
@@ -85,7 +86,7 @@ export function createApp({ media = createMedia() } = {}) {
         }
       }
       if (req.url === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true, mediaConfigured: media.configured }); return; }
-      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION, accounts: accountConfig(), countries:COUNTRIES }); return; }
+      if (req.url === '/api/config' && req.method === 'GET') { json(res, 200, { mediaConfigured: media.configured, policyVersion: POLICY_VERSION, accounts: accountConfig(), countries:COUNTRIES,hobbies:HOBBIES,maxHobbies:MAX_HOBBIES }); return; }
       if (req.url === '/api/me' && req.method === 'GET') { json(res, 200, { user: publicUser(userFromRequest(req),req) }); return; }
       if (req.url === '/api/rooms' && req.method === 'GET') {
         if (!userFromRequest(req)) { json(res, 401, { error: 'Sign in first' }); return; }
