@@ -1,6 +1,6 @@
 import { Room, RoomEvent, Track, createLocalTracks } from '/livekit.js';
 const $ = id => document.getElementById(id);
-let socket, liveRoom, localTracks = [], activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
+let socket, liveRoom, localTracks = [], cameraEffect = null, activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
 let adminView='overview', adminOpenMember=null, adminSaving=false, managementData, previewTracks=[], previewGeneration=0, notificationItems=[];
 function textElement(tag,text){const e=document.createElement(tag);e.textContent=text;return e;}
 let config = { mediaConfigured: false, policyVersion: '' };
@@ -128,7 +128,7 @@ function showRoom(room) {
   for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
   $('viewersPanel').hidden = role !== 'host'; $('leave').textContent = role === 'host' ? 'End live' : 'Leave';
-  $('mute').textContent = 'Mute mic'; $('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';
+  $('mute').textContent = 'Mute mic'; $('openLiveFilters').hidden=role!=='host' || !cameraFiltersSupported();$('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';$('stageViewerCount').textContent='0';
   updateWatermark();
 }
 async function attachMedia(credentials, roomInfo) {
@@ -145,7 +145,11 @@ async function attachMedia(credentials, roomInfo) {
   await room.connect(credentials.url, credentials.token);
   if (liveRoom !== room || !activeRoom) { await room.disconnect(); throw Error('Room closed'); }
   if (role === 'host') {
-    for (const track of localTracks) { await room.localParticipant.publishTrack(track, { source: track.kind === Track.Kind.Video ? Track.Source.Camera : Track.Source.Microphone }); if (track.kind === Track.Kind.Video) track.attach($('local')); }
+    for (const track of localTracks) {
+      const camera=track.kind===Track.Kind.Video,output=camera ? await createCameraEffect(track) || track : track;
+      const publication=await room.localParticipant.publishTrack(output,{source:camera?Track.Source.Camera:Track.Source.Microphone});
+      if(camera)publication.track.attach($('local'));
+    }
   } else {
     for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
       if (participant.identity === roomInfo.hostId && publication.track) publication.track.attach(publication.track.kind === Track.Kind.Video ? $('remote') : $('remoteAudio'));
@@ -176,7 +180,7 @@ function connect(firstMessage) {
         item.append(name, message); $('chatLog').append(item);
         if ($('chatLog').children.length > 100) $('chatLog').firstChild.remove(); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
-      if (msg.type === 'viewers') $('viewerCount').textContent = msg.count;
+      if (msg.type === 'viewers') {$('viewerCount').textContent = msg.count;$('stageViewerCount').textContent=msg.count;}
       if (msg.type === 'roster') {
         $('viewerList').replaceChildren();
         if (!msg.viewers.length) $('viewerList').textContent = 'Waiting for your first viewer.';
@@ -193,12 +197,12 @@ function connect(firstMessage) {
   });
 }
 function cleanup() {
-  stopPreview();activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
+  stopPreview();stopCameraEffect();activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
   $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
-  $('reportDialog').close(); $('joinDialog').close(); $('chatLog').replaceChildren();
+  $('reportDialog').close(); $('joinDialog').close(); $('liveFilterDialog').close(); $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
 $('start').onclick = async () => {
@@ -410,6 +414,39 @@ async function loadHostHub(){try{
 $('hostHubBack').onclick=()=>navigate('profile');
 $('hubStart').onclick=()=>navigate('studio');$('hubApply').onclick=()=>$('applyHost').click();
 function deviceOptions(){return {audio:$('micDevice').value?{deviceId:{exact:$('micDevice').value}}:true,video:{...($('cameraDevice').value?{deviceId:{exact:$('cameraDevice').value}}:{facingMode:'user'}),resolution:{width:640,height:480,frameRate:24}}};}
+const cameraLooks=[
+ {id:'none',name:'Original',values:[1,1,1,0,0,0],swatch:'linear-gradient(140deg,#565c6e,#a79baa)'},
+ {id:'natural',name:'Natural',values:[1.06,1.04,1.08,0,0,0],swatch:'linear-gradient(140deg,#5b786e,#e0b393)'},
+ {id:'soft',name:'Soft',values:[1.08,.94,.91,.05,0,0],swatch:'linear-gradient(140deg,#a688ae,#f2c6c3)'},
+ {id:'glow',name:'Glow',values:[1.15,.94,1.11,.08,-4,0],swatch:'linear-gradient(140deg,#a36e93,#ffd4a0)'},
+ {id:'warm',name:'Warm',values:[1.06,1.05,1.15,.17,-10,0],swatch:'linear-gradient(140deg,#a65a62,#ecaa58)'},
+ {id:'cool',name:'Cool',values:[1.04,1.07,1.10,0,16,0],swatch:'linear-gradient(140deg,#426c9c,#a6c3df)'},
+ {id:'vivid',name:'Vivid',values:[1.04,1.15,1.35,0,0,0],swatch:'linear-gradient(140deg,#694c9d,#e571aa)'},
+ {id:'rose',name:'Rose',values:[1.08,1.02,1.14,.10,-18,0],swatch:'linear-gradient(140deg,#934a76,#f6a8aa)'},
+ {id:'vintage',name:'Vintage',values:[1.03,.94,.77,.35,-8,0],swatch:'linear-gradient(140deg,#6a5948,#cda976)'},
+ {id:'mono',name:'Mono',values:[1.03,1.14,1,0,0,1],swatch:'linear-gradient(140deg,#333847,#c6c7d0)'}
+];
+let cameraLook='none',cameraStrength=70,cameraSoftFocus=0;
+function cameraFiltersSupported(){const canvas=document.createElement('canvas');return typeof canvas.captureStream==='function' && 'filter' in canvas.getContext('2d');}
+function cameraFilterCSS(){const look=cameraLooks.find(x=>x.id===cameraLook)||cameraLooks[0],t=cameraStrength/100,[brightness,contrast,saturate,sepia,hue,mono]=look.values;const mix=value=>1+(value-1)*t;return `brightness(${mix(brightness)}) contrast(${mix(contrast)}) saturate(${mix(saturate)}) sepia(${sepia*t}) hue-rotate(${hue*t}deg) grayscale(${mono*t}) blur(${cameraSoftFocus/100}px)`;}
+function updateCameraLookUI(){for(const id of ['studioFilters','liveFilters'])for(const button of $(id).children)button.setAttribute('aria-pressed',String(button.dataset.look===cameraLook));for(const id of ['studioFilterStrength','liveFilterStrength'])$(id).value=String(cameraStrength);for(const id of ['studioSoftFocus','liveSoftFocus'])$(id).value=String(cameraSoftFocus);for(const id of ['studioStrengthValue','liveStrengthValue'])$(id).textContent=cameraStrength+'%';for(const id of ['studioSoftValue','liveSoftValue'])$(id).textContent=cameraSoftFocus+'%';$('cameraPreview').style.filter=cameraFilterCSS();}
+for(const container of ['studioFilters','liveFilters'])for(const look of cameraLooks){const button=document.createElement('button');button.type='button';button.className='filter-preset';button.dataset.look=look.id;button.setAttribute('aria-label',look.name+' filter');const swatch=document.createElement('i');swatch.style.background=look.swatch;swatch.setAttribute('aria-hidden','true');button.append(swatch,document.createTextNode(look.name));button.onclick=()=>{cameraLook=look.id;updateCameraLookUI();};$(container).append(button);}
+for(const [id,key] of [['studioFilterStrength','strength'],['liveFilterStrength','strength'],['studioSoftFocus','soft'],['liveSoftFocus','soft']])$(id).oninput=()=>{if(key==='strength')cameraStrength=Number($(id).value);else cameraSoftFocus=Number($(id).value);updateCameraLookUI();};
+updateCameraLookUI();
+if(!cameraFiltersSupported()){$('filterSupport').textContent='Camera filters are unavailable on this browser; your original camera can still stream.';for(const id of ['studioFilters','studioFilterStrength','studioSoftFocus'])$(id).inert=true;}
+$('openLiveFilters').onclick=()=>{$('liveFilterDialog').showModal();};$('closeLiveFilters').onclick=()=>$('liveFilterDialog').close();
+function stopCameraEffect(){if(!cameraEffect)return;clearInterval(cameraEffect.timer);cameraEffect.source.pause();cameraEffect.source.srcObject=null;cameraEffect.output.stop();cameraEffect=null;}
+async function createCameraEffect(track){
+ if(!cameraFiltersSupported())return null;
+ let source,output,timer;
+ try{
+  source=document.createElement('video');source.autoplay=true;source.muted=true;source.playsInline=true;source.srcObject=new MediaStream([track.mediaStreamTrack]);await source.play();
+  if(!source.videoWidth)await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Camera frames unavailable')),5000);source.onloadeddata=()=>{clearTimeout(timeout);resolve();};});
+  const canvas=document.createElement('canvas'),ratio=Math.min(1,640/Math.max(source.videoWidth,source.videoHeight));canvas.width=Math.max(1,Math.round(source.videoWidth*ratio));canvas.height=Math.max(1,Math.round(source.videoHeight*ratio));const ctx=canvas.getContext('2d',{alpha:false});
+  const draw=()=>{if(source.readyState<2)return;ctx.filter=cameraFilterCSS();ctx.drawImage(source,0,0,canvas.width,canvas.height);ctx.filter='none';};draw();
+  output=canvas.captureStream(24).getVideoTracks()[0];if(!output)throw Error('Filtered camera unavailable');timer=setInterval(draw,1000/24);cameraEffect={source,output,timer};return output;
+ }catch(error){clearInterval(timer);output?.stop();source?.pause();if(source)source.srcObject=null;$('openLiveFilters').hidden=true;status('Camera filters unavailable on this device. Streaming your original camera.');return null;}
+}
 function stopPreview(){previewGeneration++;for(const t of previewTracks){t.detach();t.stop();}previewTracks=[];$('cameraPreview').srcObject=null;$('cameraPreview').hidden=true;}
 async function populateDevices(){const devices=await navigator.mediaDevices.enumerateDevices();for(const [id,kind] of [['cameraDevice','videoinput'],['micDevice','audioinput']]){const select=$(id),previous=select.value;select.replaceChildren();const defaultOption=textElement('option','Default device');defaultOption.value='';select.append(defaultOption);for(const device of devices.filter(d=>d.kind===kind)){const option=textElement('option',device.label || `${kind==='videoinput'?'Camera':'Microphone'} ${select.options.length}`);option.value=device.deviceId;select.append(option);}select.value=previous;}}
 $('previewDevices').onclick=async()=>{if(busy)return;$('previewDevices').disabled=true;try{stopPreview();const generation=previewGeneration;const tracks=await createLocalTracks(deviceOptions());if(generation!==previewGeneration || $('studio').hidden){for(const t of tracks)t.stop();return;}previewTracks=tracks;previewTracks.find(t=>t.kind===Track.Kind.Video)?.attach($('cameraPreview'));$('cameraPreview').hidden=false;await populateDevices();$('deviceStatus').textContent='Preview is local. Change a device and click Check devices again.';}catch(e){stopPreview();$('deviceStatus').textContent=e.name==='NotAllowedError'?'Allow camera and microphone access to check your devices.':e.message;}finally{$('previewDevices').disabled=false;}};
