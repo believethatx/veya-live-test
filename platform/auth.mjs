@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS account_tokens (token_hash TEXT PRIMARY KEY, user_id 
 db.exec(`CREATE TABLE IF NOT EXISTS profiles (user_id TEXT PRIMARY KEY REFERENCES users(id), bio TEXT NOT NULL DEFAULT '', avatar TEXT NOT NULL DEFAULT '', interests TEXT NOT NULL DEFAULT '[]', completed INTEGER NOT NULL DEFAULT 0);`);
 if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name==='country'))db.exec("ALTER TABLE profiles ADD COLUMN country TEXT NOT NULL DEFAULT ''");
 export const INTERESTS = ['Chat', 'Music', 'Gaming', 'Other'];
-for(const [name,definition] of [['age','INTEGER'],['hobbies',"TEXT NOT NULL DEFAULT ''"]])if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name===name))db.exec(`ALTER TABLE profiles ADD COLUMN ${name} ${definition}`);
-const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed,country,age,hobbies FROM profiles WHERE user_id=?').get(id); return {age:p?.age ?? null,hobbies:storedHobbies(p?.hobbies),bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],country:p?.country || '',onboarded:Boolean(p?.completed && p?.country)}; };
+for(const [name,definition] of [['banner',"TEXT NOT NULL DEFAULT ''"],['theme',"TEXT NOT NULL DEFAULT 'violet'"],['profile_locked','INTEGER NOT NULL DEFAULT 0'],['profile_removed','INTEGER NOT NULL DEFAULT 0'],['age','INTEGER'],['hobbies',"TEXT NOT NULL DEFAULT ''"]])if(!db.prepare('PRAGMA table_info(profiles)').all().some(c=>c.name===name))db.exec(`ALTER TABLE profiles ADD COLUMN ${name} ${definition}`);
+const profileFor = id => { const p = db.prepare('SELECT bio,avatar,interests,completed,country,age,hobbies,banner,theme,profile_locked,profile_removed FROM profiles WHERE user_id=?').get(id); return {banner:p?.banner || '',theme:p?.theme || 'violet',profileLocked:Boolean(p?.profile_locked),profileRemoved:Boolean(p?.profile_removed),age:p?.age ?? null,hobbies:storedHobbies(p?.hobbies),bio:p?.bio || '',avatar:p?.avatar || '',interests:p ? JSON.parse(p.interests) : [],country:p?.country || '',onboarded:Boolean(p?.completed && p?.country)}; };
 const sessions = db.prepare('SELECT u.id, u.email, u.display_name AS displayName, u.email_verified, u.adult_ack FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?');
 const tokenHash = token => createHash('sha256').update(token).digest('hex');
 const publicUser = row => ({ id: row.id, email: row.email, displayName: row.displayName, emailVerified: Boolean(row.email_verified), adult: Boolean(row.adult_ack), ...profileFor(row.id) });
@@ -82,31 +82,35 @@ export function sessionCookie(token, secure) {
 }
 export const expiredCookie = 'veya_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
 
-const userById = id => { const row = db.prepare('SELECT id,email,display_name AS displayName,email_verified,adult_ack FROM users WHERE id=?').get(id); return row ? publicUser(row) : null; };
+export const userById = id => { const row = db.prepare('SELECT id,email,display_name AS displayName,email_verified,adult_ack FROM users WHERE id=?').get(id); return row ? publicUser(row) : null; };
 export function confirmAdult(id) { db.prepare('UPDATE users SET adult_ack=1 WHERE id=?').run(id); return userById(id); }
-export function saveProfile(id, input) {
+export function saveProfile(id, input, {admin=false}={}) {
   const user = userById(id); if (!user) throw Error('Sign in first');
+  if(!admin && (user.profileLocked || user.profileRemoved))throw Error('Your profile is locked by an admin. Contact support to request a change.');
   if(!COUNTRY_CODES.has(input.country))throw Error('Select your country');
   const name = typeof input.displayName === 'string' ? input.displayName.trim() : '';
   if (name.length < 2 || name.length > 40) throw Error('Display name must be 2 to 40 characters');
   if (typeof input.bio !== 'string' || input.bio.length > 160) throw Error('Keep your bio under 160 characters');
   if (!Array.isArray(input.interests) || input.interests.length > 4 || input.interests.some(x => !INTERESTS.includes(x))) throw Error('Choose interests from the list');
-  if (!user.adult && input.adult !== true) throw Error('Confirm you are 18 or older');
+  if (!admin && !user.adult && input.adult !== true) throw Error('Confirm you are 18 or older');
   const age=input.age===undefined ? user.age : input.age;const hobbies=input.hobbies===undefined ? user.hobbies : input.hobbies;
   if(age!==null && (!Number.isInteger(age) || age<18 || age>120))throw Error('Age must be a whole number from 18 to 120, or left blank');
   const selectedHobbies=validateHobbies(hobbies);
-  const avatar = input.avatar ?? '';
-  if (typeof avatar !== 'string' || avatar.length > 150000) throw Error('Choose a smaller profile photo');
-  if (avatar) {
-    const match = avatar.match(/^data:image\/(jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/);
-    if (!match) throw Error('Use a JPG or PNG profile photo');
-    const bytes = Buffer.from(match[2], 'base64');
-    if (!(match[1] === 'jpeg' ? bytes.subarray(0,3).equals(Buffer.from([255,216,255])) : bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))) throw Error('Invalid profile photo');
+  const avatar = input.avatar ?? user.avatar, banner=input.banner ?? user.banner, theme=input.theme ?? user.theme;
+  if(!['violet','ocean','rose','forest','sunset'].includes(theme))throw Error('Choose a profile theme from the list');
+  for(const [image,limit] of [[avatar,150000],[banner,250000]]){
+    if(typeof image!=='string' || image.length>limit)throw Error('Choose a smaller profile image');
+    if(!image)continue;
+    const match=image.match(/^data:image\/(jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/);
+    if(!match)throw Error('Use a JPG or PNG profile image');
+    const bytes=Buffer.from(match[2],'base64');
+    if(!(match[1]==='jpeg'?bytes.subarray(0,3).equals(Buffer.from([255,216,255])):bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))))throw Error('Invalid profile image');
   }
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('UPDATE users SET display_name=?,adult_ack=1 WHERE id=?').run(name,id);
+    db.prepare('UPDATE users SET display_name=?,adult_ack=? WHERE id=?').run(name,admin?Number(user.adult):1,id);
     db.prepare('INSERT INTO profiles (user_id,bio,avatar,interests,completed,country,age,hobbies) VALUES (?,?,?,?,1,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bio=excluded.bio,avatar=excluded.avatar,interests=excluded.interests,completed=1,country=excluded.country,age=excluded.age,hobbies=excluded.hobbies').run(id,input.bio.trim(),avatar,JSON.stringify([...new Set(input.interests)]),input.country,age,JSON.stringify(selectedHobbies));
+    db.prepare('UPDATE profiles SET banner=?,theme=? WHERE user_id=?').run(banner,theme,id);
     db.exec('COMMIT');
   } catch(e) {db.exec('ROLLBACK');throw e;}
   return userById(id);
@@ -154,4 +158,13 @@ export function consumeAccountToken(token, purpose, password) {
     db.prepare('DELETE FROM account_tokens WHERE user_id=? AND purpose=?').run(row.user_id,purpose);
     db.exec('COMMIT'); return userById(row.user_id);
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+export function setProfileState(id,action){
+ const u=userById(id);if(!u)throw Error('Account not found');
+ db.prepare('INSERT OR IGNORE INTO profiles(user_id) VALUES(?)').run(id);
+ const field=['lock','unlock'].includes(action)?'profile_locked':'profile_removed';
+ if(!['lock','unlock','remove','restore'].includes(action))throw Error('Invalid profile action');
+ db.prepare(`UPDATE profiles SET ${field}=? WHERE user_id=?`).run(['lock','remove'].includes(action)?1:0,id);
+ return userById(id);
 }

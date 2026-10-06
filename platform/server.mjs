@@ -1,7 +1,7 @@
 import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
 import {publicProfile,people,follow,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
-import {accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
+import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +107,7 @@ export function createApp({ media = createMedia() } = {}) {
         else json(res,200,hostDashboard(sessionUser,req));return;
       }
       if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
+      if(url.pathname==='/api/admin/profile' && req.method==='GET'){json(res,200,{profile:adminProfile(sessionUser,url.searchParams.get('id'))});return;}
       if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}json(res,200,management(sessionUser));return;}
       if (req.url === '/api/livekit/webhook' && req.method === 'POST') {
         try {
@@ -149,10 +150,11 @@ export function createApp({ media = createMedia() } = {}) {
           else appeal(user,input.message);
           json(res,200,{user:publicUser(user,req)});return;
         }
+        if(req.url==='/api/admin/profile'){const user=userFromRequest(req);if(!user){json(res,401,{error:'Sign in first'});return;}const input=await jsonBody(req,450000);const profile=adminProfile(user,input.userId,input);json(res,200,{profile});return;}
         if (req.url === '/api/profile') {
           const user = userFromRequest(req); if (!user) {json(res,401,{error:'Sign in first'});return;}
           if ([...wss.clients].some(s => s.user.id === user.id && rooms.peer(s))) throw Error('Leave your live room before editing your profile');
-          const updated = saveProfile(user.id, await jsonBody(req, 160000));
+          const updated = saveProfile(user.id, await jsonBody(req, 450000));
           json(res,200,{user:publicUser(updated,req)});return;
         }
         if (req.url?.startsWith('/api/admin/')) {
@@ -196,7 +198,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (req.url === '/api/register' && accountConfig().email) await deliverLink(user.email,'verify',requestOrigin(req));
         json(res, 200, { user: publicUser(user,req) }, { 'Set-Cookie': sessionCookie(createSession(user.id), secureRequest(req)) }); return;
       }
-      const path = req.url?.split('?')[0];
+      const requestedPath = req.url?.split('?')[0];const path=/^\/profile\/[0-9a-f]{32}$/.test(requestedPath)?'/':requestedPath;
       if (req.method !== 'GET' || !files[path]) { res.writeHead(404, securityHeaders); res.end('Not found'); return; }
       const [file, type] = files[path]; const data = await readFile(join(root, file));
       res.writeHead(200, { ...securityHeaders, 'Content-Type': type }); res.end(data);
