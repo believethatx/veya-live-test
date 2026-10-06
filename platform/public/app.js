@@ -76,7 +76,7 @@ function renderProfile() {
   $('profileHome').dataset.theme=currentUser.theme || 'violet';paintCover($('profileOwnCover'),currentUser.banner);
   paintProfileDetails('profile',currentUser);
   $('profileFollowers').textContent='—';$('profileFollowing').textContent='—';void loadProfileStats();
-  $('viewOwnPublicProfile').hidden=!currentUser.access?.accessAllowed || currentUser.profileRemoved;
+  $('viewOwnPublicProfile').hidden=!currentUser.access?.accessAllowed || currentUser.profileRemoved;$('postProfilePhoto').hidden=!currentUser.access?.accessAllowed || currentUser.profileRemoved;$('postProfilePhoto').disabled=Boolean(currentUser.profileLocked);
   $('profileCountryLabel').textContent='Country or region: '+(config.countries?.find(c=>c.code===currentUser.country)?.name || currentUser.country);
   $('profileOwnCountry').textContent=config.countries?.find(c=>c.code===currentUser.country)?.name || currentUser.country || 'Choose country';
   $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || '';
@@ -407,6 +407,7 @@ function paintProfileDetails(prefix,user){const age=$(prefix==='profile'?'profil
 function renderHobbyPicker(selected){$('profileHobbies').replaceChildren();for(const hobby of config.hobbies || []){const label=document.createElement('label');label.className='hobby-option';const input=document.createElement('input');input.type='checkbox';input.value=hobby;input.checked=selected.includes(hobby);input.onchange=updateHobbyPicker;label.append(input,textElement('span',hobby));$('profileHobbies').append(label);}updateHobbyPicker();}
 function updateHobbyPicker(){const inputs=[...$('profileHobbies').querySelectorAll('input')];const count=inputs.filter(x=>x.checked).length;const limit=config.maxHobbies || 6;for(const input of inputs)input.disabled=!input.checked && count>=limit;$('hobbyCount').textContent=`${count} / ${limit} selected`;}
 $('viewOwnPublicProfile').onclick=()=>openPublicProfile(currentUser.id);
+$('postProfilePhoto').onclick=async()=>{const id=currentUser.id;$('postProfilePhoto').disabled=true;try{await openPublicProfile(id);if(publicProfileId===id && !$('publicProfileDialog').hidden){selectProfileTab('moments');$('momentForm').scrollIntoView({behavior:'smooth',block:'start'});}}finally{$('postProfilePhoto').disabled=Boolean(currentUser.profileLocked);}};
 
 function paintCover(element,image){element.replaceChildren();if(image){const img=document.createElement('img');img.src=image;img.alt='';element.append(img);}}
 $('bannerFile').onchange=async()=>{const file=$('bannerFile').files[0];if(!file)return;let image;try{if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>5*1024*1024)throw Error('Choose a photo under 5 MB.');image=await createImageBitmap(file);const canvas=document.createElement('canvas');canvas.width=1000;canvas.height=400;const ctx=canvas.getContext('2d');const ratio=Math.max(1000/image.width,400/image.height);ctx.drawImage(image,(1000-image.width*ratio)/2,(400-image.height*ratio)/2,image.width*ratio,image.height*ratio);draftBanner=canvas.toDataURL('image/jpeg',.75);if(draftBanner.length>250000)throw Error('Choose a simpler cover photo.');paintCover($('bannerPreview'),draftBanner);}catch(e){draftBanner='';$('profileError').textContent=e.message;}finally{image?.close();$('bannerFile').value='';}};
