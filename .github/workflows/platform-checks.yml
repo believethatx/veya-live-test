@@ -27,4 +27,5 @@ jobs:
       - run: node scripts/ui-smoke.mjs
       - run: node scripts/profile-social-smoke.mjs
       - run: node scripts/admin-smoke.mjs
+      - run: node scripts/host-hub-smoke.mjs
       - run: bash scripts/media-ci.sh

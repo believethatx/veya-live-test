@@ -43,6 +43,6 @@ try {
   await viewerB.locator('#openReport').click(); await viewerB.locator('#reportDetails').fill('Synthetic report test'); await viewerB.locator('#reportForm button').last().click(); await viewerB.getByText('Report received. Thank you for helping keep Veya safe.').waitFor();
   await host.locator('.viewer').filter({ hasText: 'ViewerA' }).getByRole('button', { name: 'Remove' }).click(); await viewerA.getByText('The host removed you from this room.', { exact: true }).waitFor();
   await host.locator('#leave').click(); await viewerB.getByText('The host ended this room.', { exact: true }).waitFor();
-  await host.locator('#navProfile').click();await host.locator('#profileHostButton').click();await host.getByText('1 sessions',{exact:false}).waitFor();await host.locator('#openAdmin').click();await host.locator('#adminReportsTab').click(); await host.getByText('Synthetic report test', { exact: true }).waitFor();
+  await host.locator('#navProfile').click();await host.locator('#profileHostButton').click();await host.waitForFunction(() => document.querySelector('#hostStats')?.textContent.includes('1 lives'));await host.locator('#openAdmin').click();await host.locator('#adminReportsTab').click(); await host.getByText('Synthetic report test', { exact: true }).waitFor();
   assert.deepEqual(errors, []); console.log('PASS: real media, 2 viewers, mobile layout, chat, report, host removal and cleanup');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); }
