@@ -27,7 +27,18 @@
 </head>
 <body><main class="shell">
   <header><strong>Veya Live</strong><span class="tag">DEVELOPMENT</span></header>
-  <section id="discover"><h1>Live rooms</h1><p>Only rooms with a connected host appear here.</p><div id="rooms" aria-live="polite">Checking for rooms…</div>
+  <section id="account"><h1>Welcome to Veya</h1><p>Sign in to enter a development room. This account system is still being built.</p>
+    <form id="accountForm" class="card">
+      <h2 id="formTitle">Sign in</h2>
+      <div id="registerFields" hidden><label for="displayName">Display name</label><input id="displayName" autocomplete="nickname" maxlength="40">
+        <label><input id="adult" type="checkbox" style="width:auto"> I confirm I am 18 or older</label></div>
+      <label for="email">Email</label><input id="email" type="email" autocomplete="email" required>
+      <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+      <button class="btn" id="submitAccount" type="submit">Sign in</button>
+      <button class="btn secondary" id="toggleAccount" type="button">Create account instead</button>
+    </form><p>This development flow does not verify age or email yet.</p>
+  </section>
+  <section id="discover" hidden><h1>Live rooms</h1><p>Only rooms with a connected host appear here. Signed in as <span id="who"></span>.</p><button id="logout" class="btn secondary">Sign out</button><div id="rooms" aria-live="polite">Checking for rooms…</div>
     <div class="card"><h2>Start a room</h2><p>One host and one viewer while the live connection is being built.</p>
       <label for="title">Room title</label><input id="title" maxlength="70" placeholder="What are you streaming?">
       <label for="category">Category</label><select id="category"><option>Chat</option><option>Music</option><option>Gaming</option><option>Other</option></select>

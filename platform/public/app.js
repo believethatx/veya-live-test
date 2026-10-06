@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let socket, connection, localStream, activeRoom, role;
+let socket, connection, localStream, activeRoom, role, currentUser, registering = false;
 let pendingCandidates = [];
 const send = msg => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg)); };
 const status = text => { $('status').textContent = text; };
@@ -20,7 +20,7 @@ async function refreshRooms() {
     for (const room of rooms) {
       const button = document.createElement('button'); button.className = 'room-item';
       const name = document.createElement('strong'); name.textContent = room.title;
-      const detail = document.createElement('small'); detail.textContent = `${room.category} · ${room.viewers} viewer${room.viewers === 1 ? '' : 's'}`;
+      const detail = document.createElement('small'); detail.textContent = `${room.hostName} · ${room.category} · ${room.viewers} viewer${room.viewers === 1 ? '' : 's'}`;
       button.append(name, detail); button.onclick = () => join(room.id);
       $('rooms').append(button);
     }
@@ -71,7 +71,7 @@ function connect(firstMessage) {
       }
       if (msg.type === 'signal') { try { await signal(msg.data); } catch { status('Video connection failed. Leave and rejoin.'); } }
       if (msg.type === 'chat') {
-        const item = document.createElement('li'); item.textContent = `${msg.role === 'host' ? 'Host' : 'Viewer'}: ${msg.text}`;
+        const item = document.createElement('li'); item.textContent = `${msg.name}: ${msg.text}`;
         $('chatLog').append(item); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
       if (msg.type === 'peer-left') { connection?.close(); connection = null; status('Viewer left. Waiting for another viewer.'); }
@@ -114,5 +114,34 @@ $('mute').onclick = () => {
 $('leave').onclick = cleanup;
 $('chatForm').onsubmit = event => { event.preventDefault(); send({ type: 'chat', text: $('chatText').value }); $('chatText').value = ''; };
 const linkedRoom = new URLSearchParams(location.search).get('room');
-if (linkedRoom) join(linkedRoom); else refreshRooms();
-setInterval(refreshRooms, 10000);
+$('toggleAccount').onclick = () => {
+  registering = !registering; $('registerFields').hidden = !registering;
+  $('formTitle').textContent = registering ? 'Create account' : 'Sign in';
+  $('submitAccount').textContent = registering ? 'Create account' : 'Sign in';
+  $('toggleAccount').textContent = registering ? 'Sign in instead' : 'Create account instead';
+  $('password').autocomplete = registering ? 'new-password' : 'current-password';
+};
+async function showSignedIn(user) {
+  currentUser = user; $('account').hidden = true; $('discover').hidden = false;
+  $('who').textContent = user.displayName;
+  if (linkedRoom && !activeRoom) join(linkedRoom); else refreshRooms();
+}
+$('accountForm').onsubmit = async event => {
+  event.preventDefault(); notice(''); $('submitAccount').disabled = true;
+  try {
+    const path = registering ? '/api/register' : '/api/login';
+    const payload = { email: $('email').value, password: $('password').value };
+    if (registering) { payload.displayName = $('displayName').value; payload.adult = $('adult').checked; }
+    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await response.json(); if (!response.ok) throw Error(data.error);
+    $('password').value = ''; await showSignedIn(data.user);
+  } catch (error) { notice(error.message); }
+  finally { $('submitAccount').disabled = false; }
+};
+$('logout').onclick = async () => {
+  await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  currentUser = null; $('discover').hidden = true; $('account').hidden = false; notice('Signed out.');
+};
+try { const response = await fetch('/api/me'); const { user } = await response.json(); if (user) showSignedIn(user); }
+catch { notice('Could not check your account.'); }
+setInterval(() => { if (currentUser) refreshRooms(); }, 10000);

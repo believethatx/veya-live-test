@@ -6,14 +6,14 @@ const id = () => randomBytes(12).toString('hex');
 export class RoomRegistry {
   constructor() { this.rooms = new Map(); this.peers = new Map(); }
   list() {
-    return [...this.rooms.values()].map(r => ({ id: r.id, title: r.title, category: r.category, viewers: r.viewer ? 1 : 0, startedAt: r.startedAt }));
+    return [...this.rooms.values()].map(r => ({ id: r.id, title: r.title, category: r.category, hostName: r.hostName, viewers: r.viewer ? 1 : 0, startedAt: r.startedAt }));
   }
-  create(socket, title, category) {
+  create(socket, title, category, hostName = 'Host') {
     if (this.peers.has(socket)) throw new Error('Already in a room');
     title = String(title ?? '').trim().slice(0, 70);
     if (title.length < 3) throw new Error('Enter a room title');
     if (!categories.has(category)) throw new Error('Choose a valid category');
-    const room = { id: id(), title, category, startedAt: new Date().toISOString(), host: socket, viewer: null };
+    const room = { id: id(), title, category, hostName, startedAt: new Date().toISOString(), host: socket, viewer: null };
     this.rooms.set(room.id, room); this.peers.set(socket, { room, role: 'host' });
     return room;
   }
