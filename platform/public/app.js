@@ -12,7 +12,7 @@ async function api(path, input) {
   const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
 }
 const interests = ['Chat', 'Music', 'Gaming', 'Other'];
-let allRooms = [], selectedCategory = 'All', draftAvatar = '', editingProfile = false;
+let directoryPeople=[], followingPeople=[], allRooms = [], selectedCategory = 'All', draftAvatar = '', editingProfile = false;
 function paintAvatar(element, name, avatar = '') {
   element.replaceChildren();
   if (avatar) {const img = document.createElement('img');img.src = avatar;img.alt = '';element.append(img);}
@@ -24,8 +24,8 @@ function navigate(destination, force = false) {
   if (!force && (busy || activeRoom)) {notice('Leave your live room first.');return;}
   for (const id of ['discover','profile','studio','onboarding','admin','following','updates','hostHub']) $(id).hidden = id !== destination;
   $('appNav').hidden = destination === 'onboarding';
-  for (const [id,target] of [['navHome','discover'],['navProfile','profile'],['navLive','studio'],['navFollowing','following'],['navUpdates','updates'],['navHost','hostHub']]) {
-    if (target === destination) $(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
+  for (const [id,target] of [['navHome','discover'],['navProfile','profile'],['navLive','studio'],['navFollowing','following'],['navUpdates','updates']]) {
+    if (target === destination || (id==='navProfile' && destination==='hostHub')) $(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');
   }
   if(destination === 'discover') void refreshRooms();
   if(destination === 'profile') {renderProfile();void loadOwnAccess();}
@@ -38,15 +38,16 @@ function navigate(destination, force = false) {
 function renderRooms() {
   const query = $('roomSearch').value.trim().toLowerCase();
   const matches = allRooms.filter(r => (selectedCategory === 'All' || r.category === selectedCategory) && `${r.title} ${r.hostName}`.toLowerCase().includes(query));
+  $('roomCount').hidden=!matches.length;
   $('roomCount').textContent = `${matches.length} live ${matches.length === 1 ? 'room' : 'rooms'}`;
   $('rooms').replaceChildren();$('rooms').className = 'rooms-grid';
   if (!matches.length) {
     const empty = document.createElement('div');empty.className='empty';
     const icon=document.createElement('div');icon.className='empty-icon';icon.textContent='✦';icon.setAttribute('aria-hidden','true');
-    const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'No hosts are live right now.';
-    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'Follow a host below and see their next live in your updates.';
-    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Browse hosts';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';updateFilters();renderRooms();}else $('hostDirectory').scrollIntoView({behavior:'smooth'});};
-    empty.append(icon,title,text,button);$('rooms').append(empty);return;
+    const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'It’s quiet right now';
+    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'Follow a host below to catch their next live.';
+    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Browse hosts';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';$('clearRoomSearch').hidden=true;updateFilters();renderRooms();renderPeople(false);}else $('hostDirectory').scrollIntoView({behavior:'smooth'});};
+    const copy=document.createElement('div');copy.append(title,text);empty.append(icon,copy);if(allRooms.length)empty.append(button);$('rooms').append(empty);return;
   }
   for (const room of matches) {
     const button=document.createElement('button');button.className='room-item';
@@ -60,7 +61,7 @@ function renderRooms() {
 }
 function updateFilters() {for(const button of $('categoryFilters').children)button.setAttribute('aria-pressed',String(button.dataset.category===selectedCategory));}
 for(const category of ['All',...interests]) {const button=document.createElement('button');button.className='filter-chip';button.dataset.category=category;button.textContent=category;button.onclick=()=>{selectedCategory=category;updateFilters();renderRooms();};$('categoryFilters').append(button);}updateFilters();
-$('roomSearch').oninput=renderRooms;
+$('roomSearch').oninput=()=>{renderRooms();renderPeople(false);$('clearRoomSearch').hidden=!$('roomSearch').value;};$('clearRoomSearch').onclick=()=>{$('roomSearch').value='';$('roomSearch').oninput();$('roomSearch').focus();};
 async function refreshRooms() {
   if (activeRoom || !currentUser || $('discover').hidden) return;
   try {const {rooms}=await api('/api/rooms');allRooms=rooms;renderRooms();void loadPeople(false);}
@@ -107,7 +108,7 @@ $('profileForm').onsubmit=async event=>{
   try{const {user}=await api('/api/profile',{displayName:$('profileName').value,country:$('profileCountry').value,bio:$('profileBio').value,age:$('profileAge').value===''?null:Number($('profileAge').value),hobbies:[...$('profileHobbies').querySelectorAll('input:checked')].map(x=>x.value),avatar:draftAvatar,interests:[],adult:$('onboardingAdult').checked});const wasEditing=editingProfile;await showSignedIn(user);if(wasEditing)navigate('profile');}
   catch(e){$('profileError').textContent=e.message;}finally{$('profileNext').disabled=false;}
 };
-$('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('emptyGoLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
+$('navHome').onclick=()=>navigate('discover');$('navProfile').onclick=()=>navigate('profile');$('navLive').onclick=()=>navigate('studio');$('backFromStudio').onclick=()=>navigate('discover');$('editProfile').onclick=()=>openProfileSetup(true);
 function requestJoin(id) { if (busy || activeRoom) return;if(!currentUser.access?.accessAllowed){navigate('profile');notice('Tester access is waiting for admin approval.');return;} if(!currentUser.adult || (config.accounts?.email && !currentUser.emailVerified)){navigate('profile');notice('Verify your email before joining a live.');return;} pendingRoom = id; $('viewerRules').checked = false; $('joinDialog').showModal(); }
 function updateWatermark() {
   if (!activeRoom) return;
@@ -230,7 +231,7 @@ $('toggleAccount').onclick = () => {
 };
 let linkedRoom = new URLSearchParams(location.search).get('room');
 async function showSignedIn(user) {
-  currentUser=user;updateAccount(user);$('account').hidden=true;$('who').textContent=user.displayName;$('openAdmin').hidden=!user.admin;
+  currentUser=user;updateAccount(user);$('account').hidden=true;$('openAdmin').hidden=!user.admin;
   if(!user.onboarded){openProfileSetup();return;}
   navigate(user.access?.accessAllowed ? 'discover' : 'profile');await refreshRooms();
   if(linkedRoom && user.access?.accessAllowed && !activeRoom && user.adult && (!config.accounts?.email || user.emailVerified)){const invitation=linkedRoom;linkedRoom=null;requestJoin(invitation);}
@@ -273,8 +274,7 @@ function updateAccount(user) {
   $('emailStatus').textContent = user.emailVerified ? 'Email verified' : config.accounts?.email ? 'Verify your email before joining or hosting lives.' : 'Email delivery setup is pending.';
   $('sendVerification').hidden = Boolean(user.emailVerified || !config.accounts?.email);
   $('adultConfirm').hidden = Boolean(user.adult); $('confirmAdult').hidden = Boolean(user.adult);
-  $('emptyGoLive').textContent=user.access?.canHost ? 'Start a live' : 'Become a host';
-  $('navLive').textContent=user.access?.canHost ? '+ Go live' : 'Become a host';
+  $('navLiveLabel').textContent=user.access?.canHost ? 'Go live' : 'Host';$('navLive').setAttribute('aria-label',user.access?.canHost?'Go live':'Apply to become a host');
   $('start').disabled = !user.access?.canHost || !user.access?.accessAllowed || !config.mediaConfigured || !user.adult || Boolean(config.accounts?.email && !user.emailVerified);
   if (config.accounts?.email && !user.emailVerified) $('emailStatus').closest('details').open = true;
 }
@@ -340,11 +340,12 @@ async function loadManagement(){
 }
 $('memberSearch').oninput=()=>{if(managementData)renderMembers();};$('adminAccessTab').onclick=()=>loadManagement().catch(e=>notice(e.message));$('adminReportsTab').onclick=async()=>{try{await loadReports();$('management').hidden=true;$('reports').hidden=false;}catch(e){notice(e.message);}};
 
-$('navFollowing').onclick=()=>navigate('following');$('navUpdates').onclick=()=>navigate('updates');$('navHost').onclick=()=>navigate('hostHub');
+$('navFollowing').onclick=()=>navigate('following');$('navUpdates').onclick=()=>navigate('updates');
 $('closePublicProfile').onclick=()=>$('publicProfileDialog').close();
 async function openPublicProfile(id){try{const {profile:p}=await api('/api/public-profile?id='+encodeURIComponent(id));paintProfileDetails('public',p);paintAvatar($('publicAvatar'),p.displayName,p.avatar);$('publicName').textContent=p.displayName;$('publicBio').textContent=p.bio || '';$('publicAboutSection').hidden=!p.bio;$('publicHobbiesSection').hidden=!p.hobbies?.length;$('publicCountry').textContent=config.countries?.find(c=>c.code===p.country)?.name || p.country;$('publicRole').textContent=p.isHost?'Host':'Viewer';$('publicFollowers').textContent=p.followers;$('publicFollowing').textContent=p.following;$('followHost').hidden=p.id===currentUser.id || (!p.isHost && !p.isFollowing);$('followHost').textContent=p.isFollowing?'Unfollow':'Follow';$('followHost').onclick=async()=>{try{await api('/api/follow',{userId:p.id,enabled:!p.isFollowing});await openPublicProfile(p.id);void loadPeople(false);}catch(e){notice(e.message);}};const {rooms}=await api('/api/rooms');const live=rooms.find(r=>r.hostId===p.id);$('publicPresence').textContent=live?'Live now':p.isHost?'Not live right now':'Veya member';$('publicPresence').dataset.live=String(Boolean(live));$('joinProfileLive').hidden=!live;$('joinProfileLive').onclick=()=>{$('publicProfileDialog').close();requestJoin(live.id);};if(!$('publicProfileDialog').open)$('publicProfileDialog').showModal();}catch(e){notice(e.message);}}
-async function loadPeople(following){if(!currentUser?.access?.accessAllowed)return;const target=$(following?'followedHosts':'hostDirectory');try{const {people}=await api('/api/people?'+(following?'following=1':'hosts=1'));target.replaceChildren();if(!people.length){target.append(textElement('p',following?'You haven’t followed any hosts yet. Explore hosts and open their profile to follow.':'Approved hosts will appear here as they join.'));return;}for(const p of people){const card=document.createElement('div');card.className='card person-card';const avatar=document.createElement('div');avatar.className='avatar';paintAvatar(avatar,p.displayName,p.avatar);const copy=document.createElement('div');copy.append(textElement('strong',p.displayName),textElement('p',p.bio || (p.isHost?'Veya host':'Veya member')));const button=actionButton('View profile',()=>openPublicProfile(p.id));card.append(avatar,copy,button);target.append(card);}}catch(e){target.textContent=e.message;}}
-async function loadUpdates(render=false){if(!currentUser?.access?.accessAllowed)return;try{const result=await api('/api/notifications');notificationItems=result.items;$('navUpdates').textContent=result.unread ? `Updates (${result.unread})`:'Updates';if(!render)return;$('updateList').replaceChildren();if(!result.items.length)$('updateList').append(textElement('p','Your host updates and access decisions will appear here.'));const {rooms}=await api('/api/rooms');for(const n of result.items){const card=document.createElement('div');card.className='card';card.append(textElement('strong',n.message),textElement('p',new Date(n.createdAt).toLocaleString()));if(!n.seen)card.append(textElement('span','Unread'));const live=rooms.find(r=>r.id===n.roomId);if(live)card.append(actionButton('Join live',()=>requestJoin(live.id)));else if(n.kind==='live')card.append(textElement('p','This live has ended.'));$('updateList').append(card);}}catch(e){notice(e.message);}}
+async function loadPeople(following){if(!currentUser?.access?.accessAllowed)return;try{const {people}=await api('/api/people?'+(following?'following=1':'hosts=1'));if(following)followingPeople=people;else directoryPeople=people;renderPeople(following);}catch(e){$(following?'followedHosts':'hostDirectory').textContent=e.message;}}
+function renderPeople(following){const target=$(following?'followedHosts':'hostDirectory');const query=following?'':$('roomSearch').value.trim().toLowerCase();const source=following?followingPeople:directoryPeople;const people=source.filter(p=>`${p.displayName} ${p.bio} ${(p.hobbies || []).join(' ')} ${config.countries?.find(c=>c.code===p.country)?.name || ''}`.toLowerCase().includes(query));target.replaceChildren();if(!following){$('hostDirectoryCount').textContent=people.length ? String(people.length):'';}if(!people.length){const empty=textElement('p',following?'You haven’t followed any hosts yet. Explore hosts and open their profile to follow.':query?'No hosts match your search.':'Hosts will appear here when they’re approved.');empty.className='directory-empty';target.append(empty);return;}for(const p of people){const card=document.createElement('div');card.className='card person-card';const live=allRooms.find(r=>r.hostId===p.id);const profileButton=document.createElement('button');profileButton.className='host-card-profile';profileButton.setAttribute('aria-label','View profile');profileButton.onclick=()=>openPublicProfile(p.id);const avatar=document.createElement('div');avatar.className='avatar'+(live?' host-live-avatar':'');paintAvatar(avatar,p.displayName,p.avatar);const copy=document.createElement('div');copy.className='host-card-copy';copy.append(textElement('strong',p.displayName));const country=config.countries?.find(c=>c.code===p.country)?.name || '';copy.append(textElement('small',country || 'Veya host'));const detail=textElement('small',live?'Live now':p.hobbies?.slice(0,2).join(' · ') || 'View profile');if(live)detail.className='host-card-live';copy.append(detail);profileButton.append(avatar,copy);card.append(profileButton);if(p.id!==currentUser.id && (p.isHost || p.isFollowing)){const followButton=actionButton(p.isFollowing?'Following':'Follow',async()=>{followButton.disabled=true;try{const result=await api('/api/follow',{userId:p.id,enabled:!p.isFollowing});Object.assign(p,result.profile);renderPeople(following);}catch(e){notice(e.message);}finally{followButton.disabled=false;}});followButton.className='btn '+(p.isFollowing?'quiet':'secondary');followButton.setAttribute('aria-label',`${p.isFollowing?'Unfollow':'Follow'} ${p.displayName}`);card.append(followButton);}target.append(card);}}
+async function loadUpdates(render=false){if(!currentUser?.access?.accessAllowed)return;try{const result=await api('/api/notifications');notificationItems=result.items;$('navUpdatesLabel').textContent='Updates';$('navUpdates').setAttribute('aria-label',result.unread?`Updates, ${result.unread} unread`:'Updates');let dot=$('navUpdates').querySelector('.nav-unread');if(result.unread && !dot){dot=document.createElement('span');dot.className='nav-unread';dot.setAttribute('aria-hidden','true');$('navUpdates').append(dot);}if(!result.unread)dot?.remove();if(!render)return;$('updateList').replaceChildren();if(!result.items.length)$('updateList').append(textElement('p','Your host updates and access decisions will appear here.'));const {rooms}=await api('/api/rooms');for(const n of result.items){const card=document.createElement('div');card.className='card';card.append(textElement('strong',n.message),textElement('p',new Date(n.createdAt).toLocaleString()));if(!n.seen)card.append(textElement('span','Unread'));const live=rooms.find(r=>r.id===n.roomId);if(live)card.append(actionButton('Join live',()=>requestJoin(live.id)));else if(n.kind==='live')card.append(textElement('p','This live has ended.'));$('updateList').append(card);}}catch(e){notice(e.message);}}
 $('markUpdatesRead').onclick=async()=>{try{await api('/api/notifications/read',{ids:notificationItems.map(n=>n.id)});await loadUpdates(true);}catch(e){notice(e.message);}};
 async function loadHostHub(){try{await loadOwnAccess();const d=await api('/api/host/dashboard');$('hostHubStatus').textContent=$('trialStatus').textContent;$('hostStats').textContent=`${d.stats.hours} live hours · ${d.stats.days} streaming days · ${d.stats.sessions} sessions`;$('hostRequirements').textContent=`Programme planning: ${d.trial.requirements.hours} hours, ${d.trial.requirements.days} days. Payment and withdrawal features are not active.`;$('hubStart').hidden=!currentUser.access.canHost;$('hubApply').hidden=currentUser.access.canHost || currentUser.access.applicationPending || !currentUser.access.accessAllowed;$('hostSessions').replaceChildren();for(const session of d.sessions){$('hostSessions').append(textElement('p',`${new Date(session.startedAt).toLocaleString()} · ${Math.round((session.lastSeen-session.startedAt)/60000)} minutes · ${session.endedAt?'Ended':'Active / last connected'}`));}if(!d.sessions.length)$('hostSessions').textContent='Your completed live sessions will appear here.';}catch(e){notice(e.message);}}
 $('hubStart').onclick=()=>navigate('studio');$('hubApply').onclick=()=>$('applyHost').click();
