@@ -25,4 +25,5 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: node scripts/ui-smoke.mjs
+      - run: node scripts/admin-smoke.mjs
       - run: bash scripts/media-ci.sh
