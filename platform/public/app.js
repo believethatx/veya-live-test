@@ -69,7 +69,9 @@ async function refreshRooms() {
 function renderProfile() {
   $('accountId').textContent=currentUser.id;renderAccess();
   paintAvatar($('profileAvatar'),currentUser.displayName,currentUser.avatar);
-  $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || 'A little mystery is fine. Add a bio whenever you like.';
+  $('profileFollowers').textContent='—';$('profileFollowing').textContent='—';void loadProfileStats();
+  $('profileCountryLabel').textContent='Country or region: '+(config.countries?.find(c=>c.code===currentUser.country)?.name || currentUser.country);
+  $('profileDisplayName').textContent=currentUser.displayName;$('profileAbout').textContent=currentUser.bio || '';
 }
 function setProfileStep() {
   $('cancelProfile').hidden=!editingProfile;
@@ -298,9 +300,11 @@ try {
 } catch(e) {notice(e.message || 'Could not reach Veya. Try again shortly.');}
 
 function renderAccess(){
+ const role=currentUser.access?.hostStatus;$('profileRole').textContent=currentUser.access?.canHost ? role==='trial' ? 'Trial host':'Host' : 'Viewer';$('profileSupport').open=Boolean(currentUser.access?.blocked);
  const a=currentUser.access || {};$('accessStatus').textContent=a.blocked ? `Access suspended: ${a.blockReason}` : a.accessAllowed ? 'Tester access approved. You can watch and chat.' : 'Tester access is waiting for admin approval. Share your account ID with the admin.';
  $('applyHost').hidden=!a.accessAllowed || a.canHost || a.applicationPending || a.blocked;
  $('trialStatus').textContent=a.hostStatus==='trial' ? `Trial host · ends ${new Date(a.trialEnd).toLocaleDateString()}` : a.applicationPending ? 'Host application received. An admin will review it.' : a.hostStatus==='review' ? 'Your trial has ended. Host access is awaiting review.' : a.canHost ? 'Host access approved.' : 'Viewer account. Streaming needs separate approval.';$('trialStatus').textContent+=` · ${a.liveHours || 0} tracked live hours`;
+ $('accessStatus').hidden=Boolean(a.accessAllowed && !a.blocked);$('trialStatus').hidden=Boolean(a.hostStatus==='viewer' && !a.applicationPending);$('profile').querySelector('.profile-access').hidden=Boolean(a.accessAllowed && !a.blocked && $('applyHost').hidden && $('trialStatus').hidden);
  $('accountPhone').value=a.phone || '';
 }
 async function loadOwnAccess(){if(!currentUser)return;try{const result=await api('/api/access');currentUser.access=result.access;updateAccount(currentUser);renderAccess();$('myAppeals').replaceChildren();for(const appeal of result.appeals){const item=document.createElement('p');item.textContent=`${appeal.status}: ${appeal.message}${appeal.response ? ' · Admin: '+appeal.response : ''}`;$('myAppeals').append(item);}}catch(e){notice(e.message);}}
@@ -347,3 +351,8 @@ async function populateDevices(){const devices=await navigator.mediaDevices.enum
 $('previewDevices').onclick=async()=>{if(busy)return;$('previewDevices').disabled=true;try{stopPreview();const generation=previewGeneration;const tracks=await createLocalTracks(deviceOptions());if(generation!==previewGeneration || $('studio').hidden){for(const t of tracks)t.stop();return;}previewTracks=tracks;previewTracks.find(t=>t.kind===Track.Kind.Video)?.attach($('cameraPreview'));$('cameraPreview').hidden=false;await populateDevices();$('deviceStatus').textContent='Preview is local. Change a device and click Check devices again.';}catch(e){stopPreview();$('deviceStatus').textContent=e.name==='NotAllowedError'?'Allow camera and microphone access to check your devices.':e.message;}finally{$('previewDevices').disabled=false;}};
 $('stopPreview').onclick=()=>{stopPreview();$('deviceStatus').textContent='Camera preview stopped.';};
 setInterval(()=>void loadUpdates(!$('updates').hidden),15000);void loadUpdates();
+
+async function loadProfileStats(){const id=currentUser.id;if(!currentUser.access?.accessAllowed)return;try{const {profile}=await api('/api/public-profile?id='+encodeURIComponent(id));if(currentUser?.id!==id)return;$('profileFollowers').textContent=profile.followers;$('profileFollowing').textContent=profile.following;}catch{}}
+$('profileFollowingButton').onclick=()=>navigate('following');$('profileHostButton').onclick=()=>navigate('hostHub');
+$('profileSettingsButton').onclick=()=>{$('profileAccountSettings').open=true;$('profileAccountSettings').scrollIntoView({behavior:'smooth',block:'start'});$('profileAccountSettings').querySelector('summary').focus({preventScroll:true});};
+$('copyAccountId').onclick=async()=>{try{await navigator.clipboard.writeText(currentUser.id);$('copyIdStatus').textContent='Account ID copied.';}catch{$('copyIdStatus').textContent='Select and copy the account ID above.';}};
