@@ -8,11 +8,11 @@ const directory=mkdtempSync(join(tmpdir(),'veya-gifts-'));
 process.env.DATA_FILE=join(directory,'test.sqlite');
 const {register}=await import('../auth.mjs');
 const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS}=await import('../gifts.mjs');
-test('gift collection has 25 distinct animations within the test balance',()=>{
- assert.equal(TEST_GIFTS.length,25);
- assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,25);
- assert.equal(new Set(TEST_GIFTS.map(g=>g.codepoint)).size,25);
- for(const gift of TEST_GIFTS){assert.match(gift.codepoint,/^[0-9a-f]+(?:_[0-9a-f]+)*$/);assert.ok(gift.points>0 && gift.points<=250);}
+test('gift collection includes six distinct Veya scenes within the test balance',()=>{
+ assert.equal(TEST_GIFTS.length,31);
+ assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,31);
+ assert.equal(TEST_GIFTS.filter(g=>g.scene).length,6);
+ for(const gift of TEST_GIFTS){assert.ok(gift.codepoint||gift.scene);if(gift.codepoint)assert.match(gift.codepoint,/^[0-9a-f]+(?:_[0-9a-f]+)*$/);assert.ok(gift.points>0 && gift.points<=250);}
 });
 const sender=register({email:'sender@example.test',displayName:'Sender',password:'a long test password',adult:true});
 const recipient=register({email:'receiver@example.test',displayName:'Receiver',password:'a long test password',adult:true});
@@ -32,5 +32,13 @@ test('test gift balances are atomic, limited, idempotent and have no money field
  assert.equal(testGiftAdminHistory().length,5);
  assert.equal(testGiftWallet(sender).testOnly,true);
  assert.equal('cash' in testGiftWallet(recipient),false);
+});
+test('Veya scene gift preserves its animation identity in events and history',()=>{
+ const other=register({email:'scene@example.test',displayName:'Scene',password:'a long test password',adult:true});
+ const sent=sendTestGift(other,recipient,'room-two','phoenix','d'.repeat(32));
+ assert.equal(sent.event.scene,'phoenix');
+ assert.equal(sent.event.points,160);
+ assert.equal(testGiftWallet(other).recent[0].scene,'phoenix');
+ assert.equal(testGiftWallet(other).balance,90);
 });
 test.after(()=>rmSync(directory,{recursive:true,force:true}));

@@ -44,11 +44,17 @@ export const TEST_GIFTS=Object.freeze([
  {id:'rocket',name:'Rocket',icon:'🚀',points:120,codepoint:'1f680'},
  {id:'unicorn',name:'Unicorn',icon:'🦄',points:140,codepoint:'1f984'},
  {id:'car',name:'Car',icon:'🚗',points:180,codepoint:'1f697'},
+ {id:'snow_leopard',name:'Snow Leopard',icon:'🐆',points:110,scene:'snow_leopard'},
+ {id:'dance_party',name:'Dance Party',icon:'🎶',points:80,scene:'dance_party'},
+ {id:'football',name:'Football',icon:'⚽',points:85,scene:'football'},
+ {id:'veya_popper',name:'Celebration Popper',icon:'🎉',points:65,scene:'veya_popper'},
+ {id:'phoenix',name:'Phoenix',icon:'🔥',points:160,scene:'phoenix'},
+ {id:'moon_carriage',name:'Moon Carriage',icon:'🌙',points:200,scene:'moon_carriage'},
 ]);
 const giftById=id=>TEST_GIFTS.find(g=>g.id===id);
 const ensureWallet=id=>db.prepare('INSERT OR IGNORE INTO test_gift_wallets(user_id,balance) VALUES(?,250)').run(id);
 const readWallet=id=>db.prepare('SELECT balance,sent_points AS sentPoints,received_points AS receivedPoints FROM test_gift_wallets WHERE user_id=?').get(id);
-const entry=row=>({...row,gift:giftById(row.giftId)?.name || row.giftId,icon:giftById(row.giftId)?.icon || '✦',codepoint:giftById(row.giftId)?.codepoint || null});
+const entry=row=>({...row,gift:giftById(row.giftId)?.name || row.giftId,icon:giftById(row.giftId)?.icon || '✦',codepoint:giftById(row.giftId)?.codepoint || null,scene:giftById(row.giftId)?.scene || null});
 export function testGiftWallet(user){
  ensureWallet(user.id);
  const recent=db.prepare(`SELECT id,request_id AS requestId,sender_id AS senderId,recipient_id AS recipientId,
@@ -70,7 +76,7 @@ export function sendTestGift(sender,recipient,roomId,giftId,requestId){
   const deducted=db.prepare('UPDATE test_gift_wallets SET balance=balance-?,sent_points=sent_points+? WHERE user_id=? AND balance>=?').run(gift.points,gift.points,sender.id,gift.points);
   if(!deducted.changes)throw Error('Not enough test credits for this gift');
   db.prepare('UPDATE test_gift_wallets SET received_points=received_points+? WHERE user_id=?').run(gift.points,recipient.id);
-  const event={id:randomBytes(16).toString('hex'),senderId:sender.id,senderName:sender.displayName,recipientId:recipient.id,recipientName:recipient.displayName,roomId,giftId:gift.id,gift:gift.name,icon:gift.icon,codepoint:gift.codepoint,points:gift.points,createdAt:Date.now()};
+  const event={id:randomBytes(16).toString('hex'),senderId:sender.id,senderName:sender.displayName,recipientId:recipient.id,recipientName:recipient.displayName,roomId,giftId:gift.id,gift:gift.name,icon:gift.icon,codepoint:gift.codepoint||null,scene:gift.scene||null,points:gift.points,createdAt:Date.now()};
   db.prepare('INSERT INTO test_gift_transfers VALUES(?,?,?,?,?,?,?,?,?,?)').run(event.id,requestId,sender.id,recipient.id,sender.displayName,recipient.displayName,roomId,gift.id,gift.points,event.createdAt);
   const balance=readWallet(sender.id).balance;db.exec('COMMIT');return {event,balance,duplicate:false};
  }catch(error){db.exec('ROLLBACK');throw error;}

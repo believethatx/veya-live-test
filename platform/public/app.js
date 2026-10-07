@@ -4,6 +4,7 @@ let socket, liveRoom, localTracks = [], cameraEffect = null, previewEffect = nul
 let pendingChat = null, chatStatusTimer, roomConfirmAction = null;
 let liveParticipants=[],giftPending=null,giftWallet=null;
 const giftIds=new Set(['heart','star','flower','crown']);
+const sceneGifts=new Set(['snow_leopard','dance_party','football','veya_popper','phoenix','moon_carriage']);
 const giftArt=id=>`/gifts/${giftIds.has(id)?id:'heart'}.svg`;
 const giftCode=codepoint=>/^[0-9a-f]+(?:_[0-9a-f]+)*$/.test(codepoint||'')?codepoint:'';
 const giftThumb=codepoint=>giftCode(codepoint)?`/gifts/thumbs/${codepoint}.svg`:'';
@@ -17,18 +18,21 @@ function loadGiftAnimation(codepoint){
 }
 function giftVisual(gift){
   const wrapper=document.createElement('span');wrapper.className='gift-art';
+  const scene=gift.scene||gift.id||gift.giftId;
+  if(sceneGifts.has(scene)){const image=document.createElement('span');image.className='veya-gift-art';image.dataset.scene=scene;image.setAttribute('aria-hidden','true');wrapper.append(image);return wrapper;}
   const image=document.createElement('img');image.src=giftThumb(gift.codepoint)||giftArt(gift.id||gift.giftId);image.alt='';image.loading='lazy';image.decoding='async';
   const fallback=document.createElement('span');fallback.className='gift-art-fallback';fallback.textContent=gift.icon||'✦';fallback.hidden=true;
   image.onerror=()=>{const id=gift.id||gift.giftId;if(giftIds.has(id)&&image.src!==new URL(giftArt(id),location.href).href){image.src=giftArt(id);}else{image.hidden=true;fallback.hidden=false;}};
   wrapper.append(image,fallback);return wrapper;
 }
 let giftQueue=[],giftCelebrationTimer=null,giftAnimating=false,giftGeneration=0,giftPlayer=null;
-function resetGiftCelebration(){giftGeneration++;clearTimeout(giftCelebrationTimer);giftCelebrationTimer=null;giftQueue=[];giftAnimating=false;giftPlayer?.destroy();giftPlayer=null;$('giftCelebrationMotion').replaceChildren();$('giftCelebrationMotion').hidden=true;$('giftCelebration').hidden=true;}
+function resetGiftCelebration(){giftGeneration++;clearTimeout(giftCelebrationTimer);giftCelebrationTimer=null;giftQueue=[];giftAnimating=false;giftPlayer?.destroy();giftPlayer=null;$('giftCelebrationMotion').replaceChildren();$('giftCelebrationMotion').hidden=true;$('giftCelebrationScene').hidden=true;$('giftCelebration').hidden=true;}
 function playNextGift(){
   if(giftAnimating||!activeRoom||!giftQueue.length)return;
   giftAnimating=true;const generation=++giftGeneration,gift=giftQueue.shift(),card=$('giftCelebration');
   card.dataset.gift=gift.giftId;card.dataset.tier=giftTier(gift.points);
   giftPlayer?.destroy();giftPlayer=null;const motion=$('giftCelebrationMotion');motion.replaceChildren();motion.hidden=true;
+  const scene=$('giftCelebrationScene');scene.hidden=true;card.classList.toggle('gift-scene-celebration',sceneGifts.has(gift.giftId));
   const art=$('giftCelebrationArt'),fallback=$('giftCelebrationEmoji');fallback.hidden=true;fallback.textContent=gift.icon||'✦';art.hidden=false;
   art.onerror=()=>{if(giftIds.has(gift.giftId)&&art.src!==new URL(giftArt(gift.giftId),location.href).href){art.src=giftArt(gift.giftId);}else{art.hidden=true;fallback.hidden=false;}};
   art.src=giftThumb(gift.codepoint)||giftArt(gift.giftId);
@@ -36,6 +40,13 @@ function playNextGift(){
   $('giftCelebrationDetail').textContent=`${gift.senderName} sent a gift to ${gift.recipientName}`;
   card.hidden=false;
   const finish=()=>{if(generation!==giftGeneration)return;card.hidden=true;giftPlayer?.destroy();giftPlayer=null;motion.replaceChildren();motion.hidden=true;giftAnimating=false;playNextGift();};
+  if(sceneGifts.has(gift.giftId)){
+    art.hidden=true;scene.dataset.scene=gift.giftId;scene.hidden=false;
+    // Reset the scene on every send, including consecutive gifts of the same kind.
+    scene.style.animation='none';void scene.offsetWidth;scene.style.animation='';
+    giftCelebrationTimer=setTimeout(finish,['phoenix','moon_carriage'].includes(gift.giftId)?6000:4200);
+    return;
+  }
   giftCelebrationTimer=setTimeout(finish,3000);
   loadGiftAnimation(gift.codepoint).then(data=>{
     if(generation!==giftGeneration||card.hidden||!window.lottie)return;
