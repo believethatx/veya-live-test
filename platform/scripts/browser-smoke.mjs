@@ -32,18 +32,18 @@ try {
  await host.locator('#title').fill('Browser live test'); await host.locator('#hostRules').check(); await host.locator('#start').click();
   await host.waitForFunction(() => document.getElementById('status').textContent === 'You’re live', null, { timeout: 25000 });
   assert.equal(await host.locator('#local').getAttribute('data-filtered'), 'true', 'LiveKit publishes the filtered camera track');assert.equal(await host.locator('#local').evaluate(e => e.srcObject?.getVideoTracks()[0]?.readyState), 'live');
-  await host.locator('#openLiveFilters').click();await host.locator('#liveFilters [data-look=mono]').click();await host.locator('#liveFilterStrength').fill('85');assert.equal(await host.locator('#liveFilters [data-look=mono]').getAttribute('aria-pressed'),'true');await host.locator('#closeLiveFilters').click();
+  assert.equal(await host.locator('#studioFilters button').count(),22);await host.locator('#openLiveFilters').click();await host.locator('#liveFilters [data-look=mono]').click();await host.locator('#liveFilterStrength').fill('85');assert.equal(await host.locator('#liveFilters [data-look=mono]').getAttribute('aria-pressed'),'true');await host.locator('#liveFilters [data-look=none]').click();await host.waitForFunction(() => document.getElementById('local').dataset.filtered === 'false');await host.locator('#liveFilters [data-look=warm]').click();await host.waitForFunction(() => document.getElementById('local').dataset.filtered === 'true');await host.locator('#closeLiveFilters').click();
   await viewerA.locator('#navUpdates').click();await viewerA.getByText('Host is live: Browser live test',{exact:true}).waitFor();await viewerA.locator('#markUpdatesRead').click();await viewerA.waitForFunction(()=>document.getElementById('navUpdates').getAttribute('aria-label')==='Updates');
   for (const viewer of [viewerA, viewerB]) {
     await viewer.locator('#navHome').click();await viewer.locator('.room-item').click(); await viewer.locator('#viewerRules').check(); await viewer.locator('#confirmJoin').click();
     await viewer.waitForFunction(() => document.getElementById('remote').videoWidth > 0, null, { timeout: 25000 });
-    assert.equal(await viewer.evaluate(() => document.querySelector('video').controls), false);
+    assert.equal(await viewer.evaluate(() => document.querySelector('video').controls), false);assert.equal(await viewer.locator('#chatLog').evaluate(e => e.closest('#videoStage') !== null), true);
     assert.equal(await viewer.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
   }
   await host.waitForFunction(() => document.getElementById('viewerCount').textContent === '2');
   await viewerA.locator('#chatText').fill('Real browser chat'); await viewerA.locator('#chatForm button').click(); await viewerB.getByText('Real browser chat', { exact: true }).waitFor();
   await viewerB.locator('#openReport').click(); await viewerB.locator('#reportDetails').fill('Synthetic report test'); await viewerB.locator('#reportForm button').last().click(); await viewerB.getByText('Report received. Thank you for helping keep Veya safe.').waitFor();
-  await host.locator('.viewer').filter({ hasText: 'ViewerA' }).getByRole('button', { name: 'Remove' }).click(); await viewerA.getByText('The host removed you from this room.', { exact: true }).waitFor();
+  await host.locator('#openViewers').click();await host.locator('.viewer').filter({ hasText: 'ViewerA' }).getByRole('button', { name: 'Remove' }).click(); await viewerA.getByText('The host removed you from this room.', { exact: true }).waitFor();
   await host.locator('#leave').click(); await viewerB.getByText('The host ended this room.', { exact: true }).waitFor();
   await host.locator('#navProfile').click();await host.locator('#profileHostButton').click();await host.waitForFunction(() => document.querySelector('#hostStats')?.textContent.includes('1 lives'));await host.locator('#openAdmin').click();await host.locator('#adminReportsTab').click(); await host.getByText('Synthetic report test', { exact: true }).waitFor();
   assert.deepEqual(errors, []); console.log('PASS: real media, 2 viewers, mobile layout, chat, report, host removal and cleanup');

@@ -127,8 +127,8 @@ function updateWatermark() {
 function showRoom(room) {
   for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
-  $('viewersPanel').hidden = role !== 'host'; $('leave').textContent = role === 'host' ? 'End live' : 'Leave';
-  $('mute').textContent = 'Mute mic'; $('openLiveFilters').hidden=role!=='host' || !cameraFiltersSupported();$('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';$('stageViewerCount').textContent='0';
+  $('viewersPanel').hidden = true; $('openViewers').hidden = role !== 'host'; $('leave').setAttribute('aria-label',role === 'host' ? 'End live' : 'Leave live');
+  $('mute').innerHTML = '◉ <span>Mic on</span>'; $('openLiveFilters').hidden=role!=='host' || !cameraFiltersSupported();$('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';$('stageViewerCount').textContent='0';
   updateWatermark();
 }
 async function attachMedia(credentials, roomInfo) {
@@ -146,9 +146,9 @@ async function attachMedia(credentials, roomInfo) {
   if (liveRoom !== room || !activeRoom) { await room.disconnect(); throw Error('Room closed'); }
   if (role === 'host') {
     for (const track of localTracks) {
-      const camera=track.kind===Track.Kind.Video,output=camera ? await createCameraEffect(track) || track : track;
+      const camera=track.kind===Track.Kind.Video,raw=camera?track.mediaStreamTrack:track,output=camera && cameraEffectActive() ? await createCameraEffect(track) || raw : raw;
       const publication=await room.localParticipant.publishTrack(output,{source:camera?Track.Source.Camera:Track.Source.Microphone});
-      if(camera){publication.track.attach($('local'));$('local').dataset.filtered=String(output!==track);}
+      if(camera){publication.track.attach($('local'));$('local').dataset.filtered=String(output!==raw);}
     }
   } else {
     for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) {
@@ -202,7 +202,7 @@ function cleanup() {
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
   $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
-  $('reportDialog').close(); $('joinDialog').close(); $('liveFilterDialog').close(); $('chatLog').replaceChildren();
+  $('reportDialog').close(); $('joinDialog').close(); $('liveFilterDialog').close(); $('viewersPanel').hidden=true; $('chatLog').replaceChildren();
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
 $('start').onclick = async () => {
@@ -230,9 +230,9 @@ $('share').onclick = async () => {
   try { if (navigator.share) await navigator.share({ title: 'Join me on Veya', url }); else { await navigator.clipboard.writeText(url); notice('Invite link copied.'); } }
   catch (error) { if (error.name !== 'AbortError') notice(url); }
 };
-$('mute').onclick = async () => { const track = localTracks.find(t => t.kind === Track.Kind.Audio); if (!track) return; await (track.isMuted ? track.unmute() : track.mute()); $('mute').textContent = track.isMuted ? 'Unmute mic' : 'Mute mic'; };
+$('mute').onclick = async () => { const track = localTracks.find(t => t.kind === Track.Kind.Audio); if (!track) return; await (track.isMuted ? track.unmute() : track.mute()); $('mute').innerHTML = track.isMuted ? '◉ <span>Mic off</span>' : '◉ <span>Mic on</span>'; $('mute').setAttribute('aria-label',track.isMuted?'Unmute mic':'Mute mic'); };
 $('hearAudio').onclick = async () => { await liveRoom?.startAudio(); $('hearAudio').hidden = true; };
-$('leave').onclick = cleanup;
+$('leave').onclick = cleanup; $('openViewers').onclick=()=>{$('viewersPanel').hidden=false;};$('closeViewers').onclick=()=>{$('viewersPanel').hidden=true;};
 $('chatForm').onsubmit = event => { event.preventDefault(); send({ type: 'chat', text: $('chatText').value }); $('chatText').value = ''; };
 $('openReport').onclick = () => { $('reportDetails').value = ''; $('reportDialog').showModal(); };
 $('cancelReport').onclick = () => $('reportDialog').close();
@@ -424,29 +424,57 @@ const cameraLooks=[
  {id:'vivid',name:'Vivid',values:[1.04,1.15,1.35,0,0,0],swatch:'linear-gradient(140deg,#694c9d,#e571aa)'},
  {id:'rose',name:'Rose',values:[1.08,1.02,1.14,.10,-18,0],swatch:'linear-gradient(140deg,#934a76,#f6a8aa)'},
  {id:'vintage',name:'Vintage',values:[1.03,.94,.77,.35,-8,0],swatch:'linear-gradient(140deg,#6a5948,#cda976)'},
- {id:'mono',name:'Mono',values:[1.03,1.14,1,0,0,1],swatch:'linear-gradient(140deg,#333847,#c6c7d0)'}
+ {id:'mono',name:'Mono',values:[1.03,1.14,1,0,0,1],swatch:'linear-gradient(140deg,#333847,#c6c7d0)'},
+ {id:'sunny',name:'Sunny',values:[1.18,1.02,1.2,.12,-12,0],swatch:'linear-gradient(140deg,#cd7158,#ffe28c)'},
+ {id:'peach',name:'Peach',values:[1.12,.96,1.14,.08,-16,0],swatch:'linear-gradient(140deg,#dc8b83,#ffcfab)'},
+ {id:'amber',name:'Amber',values:[1.07,1.1,1.1,.27,-12,0],swatch:'linear-gradient(140deg,#7a402b,#f5ad53)'},
+ {id:'lavender',name:'Lilac',values:[1.08,.95,1.08,.04,18,0],swatch:'linear-gradient(140deg,#5c4d9b,#d6a9e8)'},
+ {id:'ocean',name:'Ocean',values:[1.04,1.08,1.16,0,35,0],swatch:'linear-gradient(140deg,#164c75,#81c8ce)'},
+ {id:'pastel',name:'Pastel',values:[1.16,.86,.86,.05,8,0],swatch:'linear-gradient(140deg,#b4a4d6,#f6c9d1)'},
+ {id:'cinema',name:'Cinema',values:[.94,1.24,.86,.12,-5,0],swatch:'linear-gradient(140deg,#25273b,#ad8871)'},
+ {id:'crisp',name:'Crisp',values:[1.09,1.22,1.12,0,0,0],swatch:'linear-gradient(140deg,#3e658e,#d1c4aa)'},
+ {id:'moody',name:'Moody',values:[.88,1.25,.93,0,9,0],swatch:'linear-gradient(140deg,#242c50,#736574)'},
+ {id:'sepia',name:'Sepia',values:[1.03,1.05,.85,.85,0,0],swatch:'linear-gradient(140deg,#66432f,#cfaa77)'},
+ {id:'frost',name:'Frost',values:[1.12,.96,.8,0,22,0],swatch:'linear-gradient(140deg,#638ca9,#d4e4f4)'},
+ {id:'golden',name:'Golden',values:[1.12,1.1,1.22,.2,-6,0],swatch:'linear-gradient(140deg,#8b6745,#efcb70)'}
 ];
-let cameraLook='none',cameraStrength=70,cameraSoftFocus=0;
-function cameraFiltersSupported(){const canvas=document.createElement('canvas');return typeof canvas.captureStream==='function' && 'filter' in canvas.getContext('2d');}
-function cameraFilterCSS(){const look=cameraLooks.find(x=>x.id===cameraLook)||cameraLooks[0],t=cameraStrength/100,[brightness,contrast,saturate,sepia,hue,mono]=look.values;const mix=value=>1+(value-1)*t;return `brightness(${mix(brightness)}) contrast(${mix(contrast)}) saturate(${mix(saturate)}) sepia(${sepia*t}) hue-rotate(${hue*t}deg) grayscale(${mono*t}) blur(${cameraSoftFocus/100}px)`;}
-function updateCameraLookUI(){for(const id of ['studioFilters','liveFilters'])for(const button of $(id).children)button.setAttribute('aria-pressed',String(button.dataset.look===cameraLook));for(const id of ['studioFilterStrength','liveFilterStrength'])$(id).value=String(cameraStrength);for(const id of ['studioSoftFocus','liveSoftFocus'])$(id).value=String(cameraSoftFocus);for(const id of ['studioStrengthValue','liveStrengthValue'])$(id).textContent=cameraStrength+'%';for(const id of ['studioSoftValue','liveSoftValue'])$(id).textContent=cameraSoftFocus+'%';$('cameraPreview').style.filter=cameraFilterCSS();}
-for(const container of ['studioFilters','liveFilters'])for(const look of cameraLooks){const button=document.createElement('button');button.type='button';button.className='filter-preset';button.dataset.look=look.id;button.setAttribute('aria-label',look.name+' filter');const swatch=document.createElement('i');swatch.style.background=look.swatch;swatch.setAttribute('aria-hidden','true');button.append(swatch,document.createTextNode(look.name));button.onclick=()=>{cameraLook=look.id;updateCameraLookUI();};$(container).append(button);}
-for(const [id,key] of [['studioFilterStrength','strength'],['liveFilterStrength','strength'],['studioSoftFocus','soft'],['liveSoftFocus','soft']])$(id).oninput=()=>{if(key==='strength')cameraStrength=Number($(id).value);else cameraSoftFocus=Number($(id).value);updateCameraLookUI();};
+let cameraLook='none',cameraStrength=70,cameraSoftFocus=0,cameraAdjust={brightness:0,colour:0,contrast:0},cameraSwitch=Promise.resolve();
+function cameraEffectActive(){return cameraLook!=='none'||cameraSoftFocus>0||Object.values(cameraAdjust).some(Boolean);}
+function cameraFiltersSupported(){const canvas=document.createElement('canvas');return typeof canvas.captureStream==='function' && ('filter' in canvas.getContext('2d') || Boolean(document.createElement('canvas').getContext('webgl')));}
+function cameraFilterCSS(){const look=cameraLooks.find(x=>x.id===cameraLook)||cameraLooks[0],t=cameraStrength/100,[brightness,contrast,saturate,sepia,hue,mono]=look.values;const mix=value=>1+(value-1)*t;return `brightness(${mix(brightness)*(1+cameraAdjust.brightness/100)}) contrast(${mix(contrast)*(1+cameraAdjust.contrast/100)}) saturate(${mix(saturate)*(1+cameraAdjust.colour/100)}) sepia(${sepia*t}) hue-rotate(${hue*t}deg) grayscale(${mono*t}) blur(${cameraSoftFocus/100}px)`;}
+function updateCameraLookUI(){for(const id of ['studioFilters','liveFilters'])for(const button of $(id).children)button.setAttribute('aria-pressed',String(button.dataset.look===cameraLook));for(const id of ['studioFilterStrength','liveFilterStrength'])$(id).value=String(cameraStrength);for(const id of ['studioSoftFocus','liveSoftFocus'])$(id).value=String(cameraSoftFocus);for(const id of ['studioStrengthValue','liveStrengthValue'])$(id).textContent=cameraStrength+'%';for(const id of ['studioSoftValue','liveSoftValue'])$(id).textContent=cameraSoftFocus+'%';for(const key of ['Brightness','Colour','Contrast'])for(const prefix of ['studio','live']){$(prefix+key).value=String(cameraAdjust[key.toLowerCase()]);$(prefix+key+'Value').textContent=String(cameraAdjust[key.toLowerCase()]);}$('cameraPreview').style.filter=cameraFilterCSS();}
+for(const container of ['studioFilters','liveFilters'])for(const look of cameraLooks){const button=document.createElement('button');button.type='button';button.className='filter-preset';button.dataset.look=look.id;button.setAttribute('aria-label',look.name+' filter');const swatch=document.createElement('i');swatch.style.background=look.swatch;swatch.setAttribute('aria-hidden','true');button.append(swatch,document.createTextNode(look.name));button.onclick=()=>{cameraLook=look.id;updateCameraLookUI();scheduleCameraSwitch();};$(container).append(button);}
+for(const [id,key] of [['studioFilterStrength','strength'],['liveFilterStrength','strength'],['studioSoftFocus','soft'],['liveSoftFocus','soft']])$(id).oninput=()=>{if(key==='strength')cameraStrength=Number($(id).value);else cameraSoftFocus=Number($(id).value);updateCameraLookUI();scheduleCameraSwitch();};
+for(const key of ['Brightness','Colour','Contrast'])for(const prefix of ['studio','live'])$(prefix+key).oninput=()=>{cameraAdjust[key.toLowerCase()]=Number($(prefix+key).value);updateCameraLookUI();scheduleCameraSwitch();};
 updateCameraLookUI();
-if(!cameraFiltersSupported()){$('filterSupport').textContent='Camera filters are unavailable on this browser; your original camera can still stream.';for(const id of ['studioFilters','studioFilterStrength','studioSoftFocus'])$(id).inert=true;}
+if(!cameraFiltersSupported()){$('filterSupport').textContent='Camera filters are unavailable on this browser; your original camera can still stream.';for(const id of ['studioFilters','studioFilterStrength','studioSoftFocus','studioBrightness','studioColour','studioContrast'])$(id).inert=true;}
+for(const id of ['resetStudioFilters','resetLiveFilters'])$(id).onclick=()=>{cameraLook='none';cameraStrength=70;cameraSoftFocus=0;cameraAdjust={brightness:0,colour:0,contrast:0};updateCameraLookUI();scheduleCameraSwitch();};
 $('openLiveFilters').onclick=()=>{$('liveFilterDialog').showModal();};$('closeLiveFilters').onclick=()=>$('liveFilterDialog').close();
-function stopCameraEffect(){if(!cameraEffect)return;clearInterval(cameraEffect.timer);cameraEffect.source.pause();cameraEffect.source.srcObject=null;cameraEffect.output.stop();cameraEffect=null;}
+function makeGLFilter(canvas){
+ const gl=canvas.getContext('webgl',{alpha:false,preserveDrawingBuffer:true});if(!gl)throw Error('WebGL unavailable');
+ const shader=(type,code)=>{const sh=gl.createShader(type);gl.shaderSource(sh,code);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw Error('Filter shader failed');return sh;};
+ const vert=shader(gl.VERTEX_SHADER,'attribute vec2 p; varying vec2 uv; void main(){uv=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}');
+ const frag=shader(gl.FRAGMENT_SHADER,`precision mediump float; varying vec2 uv; uniform sampler2D frame; uniform vec2 pixel; uniform vec4 basic; uniform vec3 tone; uniform float softness;
+ void main(){vec3 c=texture2D(frame,uv).rgb;vec3 blurred=(c+texture2D(frame,uv+vec2(pixel.x,0.0)).rgb+texture2D(frame,uv-vec2(pixel.x,0.0)).rgb+texture2D(frame,uv+vec2(0.0,pixel.y)).rgb+texture2D(frame,uv-vec2(0.0,pixel.y)).rgb)/5.0;c=mix(c,blurred,softness);c*=basic.x;c=(c-0.5)*basic.y+0.5;float l=dot(c,vec3(0.2126,0.7152,0.0722));c=mix(vec3(l),c,basic.z);vec3 sep=vec3(dot(c,vec3(.393,.769,.189)),dot(c,vec3(.349,.686,.168)),dot(c,vec3(.272,.534,.131)));c=mix(c,sep,basic.w);float a=radians(tone.x);vec3 k=normalize(vec3(1.0));c=c*cos(a)+cross(k,c)*sin(a)+k*dot(k,c)*(1.0-cos(a));l=dot(c,vec3(.2126,.7152,.0722));c=mix(c,vec3(l),tone.y);gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);}`);
+ const program=gl.createProgram();gl.attachShader(program,vert);gl.attachShader(program,frag);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error('Filter program failed');gl.useProgram(program);
+ const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);const pos=gl.getAttribLocation(program,'p');gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
+ const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.uniform1i(gl.getUniformLocation(program,'frame'),0);gl.uniform2f(gl.getUniformLocation(program,'pixel'),1/canvas.width,1/canvas.height);
+ const basic=gl.getUniformLocation(program,'basic'),tone=gl.getUniformLocation(program,'tone'),softness=gl.getUniformLocation(program,'softness');
+ return source=>{const look=cameraLooks.find(x=>x.id===cameraLook)||cameraLooks[0],t=cameraStrength/100,[b,c,s,sep,h,mono]=look.values;gl.viewport(0,0,canvas.width,canvas.height);gl.uniform4f(basic,(1+(b-1)*t)*(1+cameraAdjust.brightness/100),(1+(c-1)*t)*(1+cameraAdjust.contrast/100),(1+(s-1)*t)*(1+cameraAdjust.colour/100),sep*t);gl.uniform3f(tone,h*t,mono*t,0);gl.uniform1f(softness,cameraSoftFocus/40);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);};
+}
+function stopCameraEffect(){if(!cameraEffect)return;clearInterval(cameraEffect.timer);cameraEffect.source.pause();cameraEffect.source.srcObject=null;cameraEffect.source.remove();cameraEffect.output.stop();cameraEffect=null;}
 async function createCameraEffect(track){
  if(!cameraFiltersSupported())return null;
  let source,output,timer;
  try{
-  source=document.createElement('video');source.autoplay=true;source.muted=true;source.playsInline=true;source.srcObject=new MediaStream([track.mediaStreamTrack]);await source.play();
+  source=document.createElement('video');source.autoplay=true;source.muted=true;source.playsInline=true;source.srcObject=new MediaStream([track.mediaStreamTrack]);source.style.cssText='position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:.01;pointer-events:none';document.body.append(source);await source.play();
   if(!source.videoWidth)await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Camera frames unavailable')),5000);source.onloadeddata=()=>{clearTimeout(timeout);resolve();};});
-  const canvas=document.createElement('canvas'),ratio=Math.min(1,640/Math.max(source.videoWidth,source.videoHeight));canvas.width=Math.max(1,Math.round(source.videoWidth*ratio));canvas.height=Math.max(1,Math.round(source.videoHeight*ratio));const ctx=canvas.getContext('2d',{alpha:false});
-  const draw=()=>{if(source.readyState<2)return;ctx.filter=cameraFilterCSS();ctx.drawImage(source,0,0,canvas.width,canvas.height);ctx.filter='none';};draw();
+  const canvas=document.createElement('canvas'),ratio=Math.min(1,640/Math.max(source.videoWidth,source.videoHeight));canvas.width=Math.max(1,Math.round(source.videoWidth*ratio));canvas.height=Math.max(1,Math.round(source.videoHeight*ratio));const supports2d='filter' in document.createElement('canvas').getContext('2d');const ctx=supports2d?canvas.getContext('2d',{alpha:false}):null;const paint=ctx ? video=>{ctx.filter=cameraFilterCSS();ctx.drawImage(video,0,0,canvas.width,canvas.height);ctx.filter='none';} : makeGLFilter(canvas);
+  const draw=()=>{if(source.readyState<2)return;paint(source);};draw();
   output=canvas.captureStream(24).getVideoTracks()[0];if(!output)throw Error('Filtered camera unavailable');timer=setInterval(draw,1000/24);cameraEffect={source,output,timer};return output;
- }catch(error){clearInterval(timer);output?.stop();source?.pause();if(source)source.srcObject=null;$('openLiveFilters').hidden=true;status('Camera filters unavailable on this device. Streaming your original camera.');return null;}
+ }catch(error){clearInterval(timer);output?.stop();source?.pause();if(source){source.srcObject=null;source.remove();}$('openLiveFilters').hidden=true;status('Camera filters unavailable on this device. Streaming your original camera.');return null;}
 }
+function scheduleCameraSwitch(){cameraSwitch=cameraSwitch.then(async()=>{if(!activeRoom||role!=='host'||!liveRoom)return;const raw=localTracks.find(t=>t.kind===Track.Kind.Video)?.mediaStreamTrack,pub=liveRoom.localParticipant.videoTrackPublications.values().next().value;if(!raw||!pub?.track)return;const wants=cameraEffectActive()&&cameraFiltersSupported();if(wants&&!cameraEffect){const effect=await createCameraEffect(localTracks.find(t=>t.kind===Track.Kind.Video));if(effect){await pub.track.replaceTrack(effect,{userProvidedTrack:true});$('local').dataset.filtered='true';}}else if(!wants&&cameraEffect){await pub.track.replaceTrack(raw,{userProvidedTrack:true});stopCameraEffect();$('local').dataset.filtered='false';}},()=>{}).catch(()=>{status('Could not change the camera filter. Try again.');});}
 function stopPreview(){previewGeneration++;for(const t of previewTracks){t.detach();t.stop();}previewTracks=[];$('cameraPreview').srcObject=null;$('cameraPreview').hidden=true;}
 async function populateDevices(){const devices=await navigator.mediaDevices.enumerateDevices();for(const [id,kind] of [['cameraDevice','videoinput'],['micDevice','audioinput']]){const select=$(id),previous=select.value;select.replaceChildren();const defaultOption=textElement('option','Default device');defaultOption.value='';select.append(defaultOption);for(const device of devices.filter(d=>d.kind===kind)){const option=textElement('option',device.label || `${kind==='videoinput'?'Camera':'Microphone'} ${select.options.length}`);option.value=device.deviceId;select.append(option);}select.value=previous;}}
 $('previewDevices').onclick=async()=>{if(busy)return;$('previewDevices').disabled=true;try{stopPreview();const generation=previewGeneration;const tracks=await createLocalTracks(deviceOptions());if(generation!==previewGeneration || $('studio').hidden){for(const t of tracks)t.stop();return;}previewTracks=tracks;previewTracks.find(t=>t.kind===Track.Kind.Video)?.attach($('cameraPreview'));$('cameraPreview').hidden=false;await populateDevices();$('deviceStatus').textContent='Preview is local. Change a device and click Check devices again.';}catch(e){stopPreview();$('deviceStatus').textContent=e.name==='NotAllowedError'?'Allow camera and microphone access to check your devices.':e.message;}finally{$('previewDevices').disabled=false;}};
