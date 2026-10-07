@@ -14,6 +14,7 @@ import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
+import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -139,6 +140,10 @@ export function createApp({ media = createMedia() } = {}) {
         else json(res,200,hostDashboard(sessionUser,req));return;
       }
       if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
+      if(req.method==='GET' && ['/api/conversations','/api/messages'].includes(url.pathname)){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+        json(res,200,url.pathname==='/api/conversations'?{conversations:conversations(sessionUser)}:conversation(sessionUser,url.searchParams.get('userId')));return;
+      }
       if(url.pathname==='/api/admin/profile' && req.method==='GET'){json(res,200,{profile:adminProfile(sessionUser,url.searchParams.get('id'))});return;}
       if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}json(res,200,management(sessionUser));return;}
       if (req.url === '/api/livekit/webhook' && req.method === 'POST') {
@@ -169,6 +174,13 @@ export function createApp({ media = createMedia() } = {}) {
         if(req.url==='/api/admin/progression'){
           if(!hasPermission(sessionUser,'progression')){json(res,403,{error:'Progression management access required'});return;}
           json(res,200,{progression:updateProgression(sessionUser,await jsonBody(req))});return;
+        }
+        if(['/api/messages/send','/api/messages/block','/api/messages/remove'].includes(req.url)){
+          if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+          const input=await jsonBody(req);const id=String(input.userId||'');
+          if(req.url==='/api/messages/send')json(res,200,{item:sendMessage(sessionUser,id,input.body)});
+          else if(req.url==='/api/messages/block')json(res,200,blockMessages(sessionUser,id,input.enabled));
+          else json(res,200,removeConversation(sessionUser,id));return;
         }
         if (req.url === '/api/logout') {
           const user = userFromRequest(req); revokeSession(req);
