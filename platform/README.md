@@ -63,6 +63,8 @@ New and existing accounts without a completed profile enter a two-step setup: di
 
 Explore lists real live rooms with title and host search. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live requires a room title and has its own setup screen. Room privacy, moderation and media permissions are retained.
 
+Live gifts use an isolated test-credit ledger. Each approved member starts with 250 free test credits, can send a preset gift to another current room participant, and can see their balance and history in Profile. Hosts see test gifts received in their host hub; moderators can inspect the latest gift transactions. Transfers are atomic and idempotent. Test credits and gifts have no monetary value, purchase flow, conversion or payout.
+
 ## Tester and host access
 
 All accounts select a country/region from Unicode CLDR territory data. Country is self-reported and appears only in the account's own setup and admin management. Newly created and existing accounts are viewers by default; testing access requires explicit approval, and streaming requires separate host approval. Owner IDs are configured privately using `ADMIN_USER_IDS`; owner status is never granted to the first signup or inferred from an unverified email. Until an owner is configured, accounts can sign in and complete profiles but cannot enter rooms. The account ID appears in My profile to support secure owner setup.

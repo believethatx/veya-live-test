@@ -46,6 +46,17 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   const viewerA = await connect(a), viewerB = await connect(b);
   await exchange(viewerA, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerA, { type: 'ready' }, 'ready');
   await exchange(viewerB, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerB, { type: 'ready' }, 'ready');
+  assert.equal((await (await request('/api/gifts/wallet',a.cookie)).json()).wallet.balance,250);
+  assert.equal((await request('/api/gifts/wallet')).status,401);
+  assert.equal((await request('/api/admin/test-gifts',a.cookie)).status,403);
+  const giftEvent=next(host,'gift'),giftId='a'.repeat(32);
+  const giftAck=await exchange(viewerA,{type:'gift',recipientId:owner.user.id,giftId:'heart',requestId:giftId},'gift-sent');
+  assert.equal(giftAck.balance,245);assert.equal((await giftEvent).recipientId,owner.user.id);
+  assert.equal((await (await request('/api/gifts/wallet',owner.cookie)).json()).wallet.receivedPoints,5);
+  assert.equal((await (await request('/api/admin/test-gifts',owner.cookie)).json()).transfers.length,1);
+  const retry=await exchange(viewerA,{type:'gift',recipientId:owner.user.id,giftId:'heart',requestId:giftId},'gift-sent');assert.equal(retry.balance,245);
+  assert.equal((await (await request('/api/admin/test-gifts',owner.cookie)).json()).transfers.length,1);
+  assert.match((await exchange(viewerA,{type:'gift',recipientId:a.user.id,giftId:'heart',requestId:'b'.repeat(32)},'gift-error')).message,/someone else/);
   assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms[0].viewers, 2);assert.equal('category' in (await (await request('/api/rooms', a.cookie)).json()).rooms[0], false);
   const chat = next(viewerB, 'chat'); await exchange(viewerA, { type: 'chat', text: '<script>not executable</script>' }, 'chat'); assert.equal((await chat).text, '<script>not executable</script>');
   const report = await exchange(viewerB, { type: 'report', reason: 'Recording or screenshots', details: 'A viewer was recording.' }, 'reported');

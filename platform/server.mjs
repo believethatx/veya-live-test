@@ -12,6 +12,7 @@ import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
+import {testGiftWallet,sendTestGift,testGiftAdminHistory} from './gifts.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -55,7 +56,8 @@ export function createApp({ media = createMedia() } = {}) {
   function roster(room) {
     const viewers = [...room.viewers].filter(s => rooms.peer(s)?.ready).map(s => ({ id: s.user.id, name: s.user.displayName }));
     send(room.host, { type: 'roster', viewers });
-    for (const socket of rooms.participants(room)) send(socket, { type: 'viewers', count: viewers.length });
+    const participants=[{id:room.host.user.id,name:room.host.user.displayName},...viewers];
+    for (const socket of rooms.participants(room)) {send(socket, { type: 'viewers', count: viewers.length });send(socket,{type:'participants',participants});}
   }
   async function endRoom(room, message = 'The host ended this room.') {
     endHours(room);rooms.leave(room.host);
@@ -92,6 +94,14 @@ export function createApp({ media = createMedia() } = {}) {
         if (!userFromRequest(req)) { json(res, 401, { error: 'Sign in first' }); return; }
         try{assertAccess(userFromRequest(req),req);}catch(e){json(res,403,{error:e.message});return;}
         json(res, 200, { rooms: rooms.list() }); return;
+      }
+      if(req.url==='/api/gifts/wallet' && req.method==='GET'){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
+        assertAccess(sessionUser,req);json(res,200,{wallet:testGiftWallet(sessionUser)});return;
+      }
+      if(req.url==='/api/admin/test-gifts' && req.method==='GET'){
+        if(!hasPermission(sessionUser,'moderation')){json(res,403,{error:'Moderation access required'});return;}
+        json(res,200,{testOnly:true,transfers:testGiftAdminHistory()});return;
       }
       if (req.url === '/api/admin/reports' && req.method === 'GET') {
         const user = userFromRequest(req);
@@ -257,6 +267,17 @@ export function createApp({ media = createMedia() } = {}) {
           const text = String(msg.text ?? '').trim().slice(0, 280); if (!text) return;
           lastChat = Date.now();
           for (const peer of rooms.participants(entry.room)) send(peer, { type: 'chat', userId: socket.user.id, name: socket.user.displayName, text }); return;
+        }
+        if(msg.type==='gift'){
+          try{
+            if(!entry.ready)throw Error('Connect to the live room first');
+            const recipient=rooms.participants(entry.room).find(peer=>peer.user.id===msg.recipientId && rooms.peer(peer)?.ready);
+            if(!recipient)throw Error('That person is no longer in this live');
+            const result=sendTestGift(socket.user,recipient.user,entry.room.id,msg.giftId,msg.requestId);
+            send(socket,{type:'gift-sent',requestId:msg.requestId,balance:result.balance});
+            if(!result.duplicate)for(const peer of rooms.participants(entry.room))send(peer,{type:'gift',...result.event});
+          }catch(error){send(socket,{type:'gift-error',requestId:msg.requestId,message:error.message});}
+          return;
         }
         if (msg.type === 'kick') {
           const target = rooms.kick(socket, String(msg.userId));
