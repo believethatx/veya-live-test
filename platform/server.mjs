@@ -12,7 +12,7 @@ import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
-import {testGiftWallet,sendTestGift,testGiftAdminHistory} from './gifts.mjs';
+import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory} from './gifts.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -30,7 +30,7 @@ export function createApp({ media = createMedia() } = {}) {
     const token=issueAccountToken(email,purpose);
     if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
   }
-  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])) };
+  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
@@ -220,7 +220,7 @@ export function createApp({ media = createMedia() } = {}) {
       const requestedPath = req.url?.split('?')[0];const path=/^\/profile\/[0-9a-f]{32}$/.test(requestedPath)?'/':requestedPath;
       if (req.method !== 'GET' || !files[path]) { res.writeHead(404, securityHeaders); res.end('Not found'); return; }
       const [file, type, encoding] = files[path]; const data = await readFile(join(root, file));
-      res.writeHead(200, { ...securityHeaders, 'Content-Type': type, ...(encoding?{'Content-Encoding':encoding}:{}) }); res.end(data);
+      res.writeHead(200, { ...securityHeaders, 'Content-Type': type, ...(path.startsWith('/gifts/')||path==='/lottie-light.min.js'?{'Cache-Control':'public, max-age=86400'}:{}), ...(encoding?{'Content-Encoding':encoding}:{}) }); res.end(data);
     } catch (error) { json(res, 400, { error: error instanceof SyntaxError ? 'Invalid JSON' : error.message }); }
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });

@@ -7,7 +7,13 @@ import {join} from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'veya-gifts-'));
 process.env.DATA_FILE=join(directory,'test.sqlite');
 const {register}=await import('../auth.mjs');
-const {sendTestGift,testGiftWallet,testGiftAdminHistory}=await import('../gifts.mjs');
+const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS}=await import('../gifts.mjs');
+test('gift collection has 25 distinct animations within the test balance',()=>{
+ assert.equal(TEST_GIFTS.length,25);
+ assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,25);
+ assert.equal(new Set(TEST_GIFTS.map(g=>g.codepoint)).size,25);
+ for(const gift of TEST_GIFTS){assert.match(gift.codepoint,/^[0-9a-f]+(?:_[0-9a-f]+)*$/);assert.ok(gift.points>0 && gift.points<=250);}
+});
 const sender=register({email:'sender@example.test',displayName:'Sender',password:'a long test password',adult:true});
 const recipient=register({email:'receiver@example.test',displayName:'Receiver',password:'a long test password',adult:true});
 test('test gift balances are atomic, limited, idempotent and have no money fields',()=>{
