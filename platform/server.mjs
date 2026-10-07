@@ -29,7 +29,7 @@ export function createApp({ media = createMedia() } = {}) {
     const token=issueAccountToken(email,purpose);
     if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
   }
-  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'] };
+  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'] };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
@@ -38,7 +38,7 @@ export function createApp({ media = createMedia() } = {}) {
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY', 'Cache-Control': 'no-store',
     'Permissions-Policy': 'camera=(self), microphone=(self), display-capture=(), fullscreen=(self)',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss: ws:; media-src 'self' blob:; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss: ws:; media-src 'self' blob:; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   };
   async function body(req, limit = 4096) {
     const chunks = []; let size = 0;
@@ -209,8 +209,8 @@ export function createApp({ media = createMedia() } = {}) {
       }
       const requestedPath = req.url?.split('?')[0];const path=/^\/profile\/[0-9a-f]{32}$/.test(requestedPath)?'/':requestedPath;
       if (req.method !== 'GET' || !files[path]) { res.writeHead(404, securityHeaders); res.end('Not found'); return; }
-      const [file, type] = files[path]; const data = await readFile(join(root, file));
-      res.writeHead(200, { ...securityHeaders, 'Content-Type': type }); res.end(data);
+      const [file, type, encoding] = files[path]; const data = await readFile(join(root, file));
+      res.writeHead(200, { ...securityHeaders, 'Content-Type': type, ...(encoding?{'Content-Encoding':encoding}:{}) }); res.end(data);
     } catch (error) { json(res, 400, { error: error instanceof SyntaxError ? 'Invalid JSON' : error.message }); }
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });

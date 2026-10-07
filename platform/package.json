@@ -7,11 +7,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "NODE_USE_ENV_PROXY=1 node scripts/build.mjs",
     "start": "node server.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.0",
     "google-auth-library": "^11.1.0",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.1",

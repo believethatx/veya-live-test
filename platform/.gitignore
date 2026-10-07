@@ -4,3 +4,7 @@ data/
 .env.*
 !.env.example
 public/livekit.js
+
+public/face.js
+public/face_landmarker.task
+public/face-wasm/
