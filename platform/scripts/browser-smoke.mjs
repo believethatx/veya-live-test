@@ -17,7 +17,7 @@ const browser = await chromium.launch({ headless: true, args: ['--use-fake-devic
 const errors = [];
 async function account(name, mobile = false) {
   const context = await browser.newContext({ permissions: ['camera', 'microphone'], viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
-  const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+  if(name==='Host')await context.addInitScript(()=>{delete CanvasRenderingContext2D.prototype.filter;});const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.goto(base); await page.locator('#toggleAccount').click();
   await page.locator('#displayName').fill(name); await page.locator('#adult').check(); await page.locator('#email').fill(`${name}@example.test`); await page.locator('#password').fill('a very long test password'); await page.locator('#submitAccount').click();
   await page.locator('#onboarding').waitFor({state:'visible'});const id=await page.evaluate(async()=>(await (await fetch('/api/me')).json()).user.id);manage({id:'local-test-owner'},{action:'tester',userId:id,approved:true});await page.locator('#profileCountry').selectOption('GB'); await page.locator('#profileNext').click(); await page.locator('#discover').waitFor({ state: 'visible' }); return page;
