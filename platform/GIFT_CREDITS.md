@@ -25,3 +25,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Veya illustrated scenes
+
+The three six-scene artwork sheets (`veya-scenes.webp`, `veya-sparkle.webp`, `veya-premium.webp`) were generated for Veya. Their on-screen motion is authored in `public/index.html` and `public/gift-extras.css`. Short gift sounds are synthesized locally by the browser with Web Audio and have no external audio file or streaming dependency.
+
+## Country flags
+
+The eight self-hosted country SVGs under `public/gifts/flags/` come from [flag-icons](https://github.com/lipis/flag-icons), MIT licensed. The complete license notice is preserved at `public/gifts/flags/LICENSE.flag-icons`. The surrounding animation and framing are Veya's own CSS.

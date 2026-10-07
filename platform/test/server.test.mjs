@@ -49,6 +49,13 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   assert.equal((await (await request('/api/gifts/wallet',a.cookie)).json()).wallet.balance,250);
   assert.equal((await request('/api/gifts/wallet')).status,401);
   assert.equal((await request('/api/admin/test-gifts',a.cookie)).status,403);
+  assert.equal((await request('/api/admin/gift-catalog',a.cookie)).status,403);
+  assert.equal((await request('/api/admin/gift-catalog',a.cookie,{giftId:'flag_sa',points:20,enabled:false})).status,403);
+  assert.equal((await request('/api/admin/gift-catalog',owner.cookie,{giftId:'flag_sa',points:20,enabled:false},'https://attacker.example')).status,403);
+  assert.equal((await request('/api/admin/gift-catalog',owner.cookie,{giftId:'flag_sa',points:20,enabled:false})).status,200);
+  assert.equal((await (await request('/api/gifts/wallet',a.cookie)).json()).wallet.gifts.some(g=>g.id==='flag_sa'),false);
+  assert.match((await exchange(viewerA,{type:'gift',recipientId:owner.user.id,giftId:'flag_sa',requestId:'e'.repeat(32)},'gift-error')).message,/no longer available/);
+  assert.equal((await request('/api/admin/gift-catalog',owner.cookie,{giftId:'flag_sa',points:25,enabled:true})).status,200);
   const giftEvent=next(host,'gift'),giftId='a'.repeat(32);
   const giftAck=await exchange(viewerA,{type:'gift',recipientId:owner.user.id,giftId:'heart',requestId:giftId},'gift-sent');
   assert.equal(giftAck.balance,245);assert.equal((await giftEvent).recipientId,owner.user.id);

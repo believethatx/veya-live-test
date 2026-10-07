@@ -7,12 +7,13 @@ import {join} from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'veya-gifts-'));
 process.env.DATA_FILE=join(directory,'test.sqlite');
 const {register}=await import('../auth.mjs');
-const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS}=await import('../gifts.mjs');
-test('gift collection includes six distinct Veya scenes within the test balance',()=>{
- assert.equal(TEST_GIFTS.length,31);
- assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,31);
- assert.equal(TEST_GIFTS.filter(g=>g.scene).length,6);
- for(const gift of TEST_GIFTS){assert.ok(gift.codepoint||gift.scene);if(gift.codepoint)assert.match(gift.codepoint,/^[0-9a-f]+(?:_[0-9a-f]+)*$/);assert.ok(gift.points>0 && gift.points<=250);}
+const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS,giftCatalog,updateGiftCatalog}=await import('../gifts.mjs');
+test('catalog includes illustrated, flag and classic gifts with distinct IDs',()=>{
+ assert.equal(TEST_GIFTS.length,51);
+ assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,51);
+ assert.equal(TEST_GIFTS.filter(g=>g.scene).length,18);
+ assert.equal(TEST_GIFTS.filter(g=>g.flag).length,8);
+ for(const gift of TEST_GIFTS){assert.ok(gift.codepoint||gift.scene||gift.flag);if(gift.codepoint)assert.match(gift.codepoint,/^[0-9a-f]+(?:_[0-9a-f]+)*$/);assert.ok(gift.points>0 && gift.points<=250);}
 });
 const sender=register({email:'sender@example.test',displayName:'Sender',password:'a long test password',adult:true});
 const recipient=register({email:'receiver@example.test',displayName:'Receiver',password:'a long test password',adult:true});
@@ -40,5 +41,18 @@ test('Veya scene gift preserves its animation identity in events and history',()
  assert.equal(sent.event.points,160);
  assert.equal(testGiftWallet(other).recent[0].scene,'phoenix');
  assert.equal(testGiftWallet(other).balance,90);
+});
+test('admin availability and price apply to new sends while history keeps its price',()=>{
+ const actor={id:'admin'},other=register({email:'flag@example.test',displayName:'Flag',password:'a long test password',adult:true});
+ const original=sendTestGift(other,recipient,'room-flags','flag_sa','e'.repeat(32));assert.equal(original.event.points,25);assert.equal(original.event.flag,'sa');
+ updateGiftCatalog(actor,'flag_sa',30,false);
+ assert.equal(giftCatalog().some(g=>g.id==='flag_sa'),false);
+ assert.throws(()=>sendTestGift(other,recipient,'room-flags','flag_sa','f'.repeat(32)),/no longer available/);
+ assert.equal(sendTestGift(other,recipient,'room-flags','flag_sa','e'.repeat(32)).duplicate,true);
+ updateGiftCatalog(actor,'flag_sa',18,true);
+ const next=sendTestGift(other,recipient,'room-flags','flag_sa','1'.repeat(32));assert.equal(next.event.points,18);
+ assert.equal(testGiftWallet(other).recent.find(e=>e.id===original.event.id).points,25);
+ assert.throws(()=>updateGiftCatalog(actor,'flag_sa',0,true),/1 to 250/);
+ assert.throws(()=>updateGiftCatalog(actor,'unknown',25,true),/not found/);
 });
 test.after(()=>rmSync(directory,{recursive:true,force:true}));

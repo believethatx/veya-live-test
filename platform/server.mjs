@@ -12,7 +12,7 @@ import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
-import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory} from './gifts.mjs';
+import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -30,7 +30,7 @@ export function createApp({ media = createMedia() } = {}) {
     const token=issueAccountToken(email,purpose);
     if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
   }
-  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/gifts/veya-scenes.webp':['gifts/veya-scenes.webp','image/webp'], ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
+  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/gift-extras.css':['gift-extras.css','text/css; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['veya-scenes','veya-sparkle','veya-premium'].map(id=>[`/gifts/${id}.webp`,[`gifts/${id}.webp`,'image/webp']])), ...Object.fromEntries(['sa','ae','kw','qa','eg','ps','iq','lb'].map(id=>[`/gifts/flags/${id}.svg`,[`gifts/flags/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
@@ -100,8 +100,12 @@ export function createApp({ media = createMedia() } = {}) {
         assertAccess(sessionUser,req);json(res,200,{wallet:testGiftWallet(sessionUser)});return;
       }
       if(req.url==='/api/admin/test-gifts' && req.method==='GET'){
-        if(!hasPermission(sessionUser,'moderation')){json(res,403,{error:'Moderation access required'});return;}
+        if(!hasPermission(sessionUser,'moderation')&&!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
         json(res,200,{testOnly:true,transfers:testGiftAdminHistory()});return;
+      }
+      if(req.url==='/api/admin/gift-catalog' && req.method==='GET'){
+        if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
+        json(res,200,{testOnly:true,gifts:giftCatalog(true),audit:giftCatalogAudit()});return;
       }
       if (req.url === '/api/admin/reports' && req.method === 'GET') {
         const user = userFromRequest(req);
@@ -141,6 +145,11 @@ export function createApp({ media = createMedia() } = {}) {
       }
       if (req.url?.startsWith('/api/') && req.method === 'POST') {
         if (req.headers.origin !== requestOrigin(req)) { json(res, 403, { error: 'Invalid origin' }); return; }
+        if(req.url==='/api/admin/gift-catalog'){
+          if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
+          const input=await jsonBody(req);
+          json(res,200,{gift:updateGiftCatalog(sessionUser,String(input.giftId||''),input.points,input.enabled)});return;
+        }
         if (req.url === '/api/logout') {
           const user = userFromRequest(req); revokeSession(req);
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');

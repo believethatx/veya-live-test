@@ -14,6 +14,7 @@ test('tester and host approval are independent; trials expire; only scoped admin
  const now=Date.now;Date.now=()=>now()+3*86400000;try{assert.equal(access.accessFor(viewer,req).canHost,false);}finally{Date.now=now;}
  access.manage(owner,{action:'host',userId:viewer.id,status:'approved'});assert.equal(access.accessFor(viewer,req).canHost,true);
  const admin=account('Scoped');access.manage(owner,{action:'permissions',userId:admin.id,permissions:['hosts']});assert.equal(access.hasPermission(admin,'hosts'),true);assert.equal(access.hasPermission(admin,'moderation'),false);
+ access.manage(owner,{action:'permissions',userId:admin.id,permissions:['hosts','gifts']});assert.equal(access.hasPermission(admin,'gifts'),true);assert.equal(access.hasPermission(admin,'settings'),false);
  assert.throws(()=>access.manage(admin,{action:'tester',userId:viewer.id,approved:false}),/permission/);assert.throws(()=>access.manage(admin,{action:'permissions',userId:viewer.id,permissions:['settings']}),/Only the owner/);
  access.manage(admin,{action:'host',userId:viewer.id,status:'viewer'});assert.equal(access.accessFor(viewer,req).canHost,false);assert.equal(access.accessFor(viewer,req).accessAllowed,true);
 });
