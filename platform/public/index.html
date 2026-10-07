@@ -58,25 +58,31 @@
 
 /* Keep the live camera visible while editing its look. */
 #room.filters-open{display:flex;flex-direction:column}
-#room.filters-open .video-stage,#room.filters-open .video-stage.video-stage{flex:1 1 52%;height:52%;min-height:0;max-height:none}
+#room.filters-open .video-stage,#room.filters-open .video-stage.video-stage{flex:1 1 auto;height:auto;min-height:0;max-height:none}
 #room.filters-open .room-bottom{display:none}
 #room.filters-open .stage-shade{background:linear-gradient(#06060dbb,transparent 32%)}
 #room.filters-open .watermark{top:auto;bottom:12px}
-#room #liveFilterDialog{position:relative;inset:auto;flex:1 1 48%;height:48%;min-height:235px;max-height:none;overflow-y:auto;width:100%;max-width:none;padding:12px 16px calc(16px + env(safe-area-inset-bottom));margin:0;border:0;border-top:1px solid #383a50;border-radius:20px 20px 0 0;background:#191b2a;color:#fff;box-shadow:none}
+#room #liveFilterDialog{position:relative;inset:auto;flex:0 0 clamp(205px,28%,245px);height:clamp(205px,28%,245px);min-height:0;max-height:none;overflow-y:auto;width:100%;max-width:none;padding:9px 12px calc(10px + env(safe-area-inset-bottom));margin:0;border:0;border-top:1px solid #383a50;border-radius:16px 16px 0 0;background:#171925;color:#fff;box-shadow:none}
 #liveFilterDialog .filter-dialog-head h2{font-size:17px}
 #liveFilterDialog .filter-dialog-head button{font-size:13px;font-weight:750;color:#c7aaff;padding:7px 10px}
 #liveFilterDialog .filter-tabs{grid-template-columns:repeat(3,1fr);margin:9px 0}
 #liveFilterDialog .filter-tabs button{padding:8px}
-#liveFilterDialog .filter-presets,#liveFilterDialog .face-choices{display:flex;gap:9px;overflow-x:auto;overflow-y:hidden;max-height:none;padding:8px 0;scroll-snap-type:x proximity}
+#liveFilterDialog .filter-presets,#liveFilterDialog .face-choices{display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;max-height:none;padding:5px 0;scroll-snap-type:x proximity}
 #liveFilterDialog .filter-preset{width:66px;min-width:66px}
-#liveFilterDialog .face-choice{flex:none;min-width:82px;max-width:96px;min-height:57px;border:1px solid #50536b;border-radius:14px;color:#ded9eb;background:#292c40;padding:8px;font-size:12px;line-height:1.2;white-space:normal;scroll-snap-align:start}
+#liveFilterDialog .face-choice{flex:none;width:70px;min-width:70px;height:68px;border:1px solid #50536b;border-radius:12px;color:#ded9eb;background:#292c40;padding:5px 3px;font-size:10px;line-height:1.1;white-space:normal;scroll-snap-align:start}
+#liveFilterDialog .face-choice .face-symbol{display:block;font-size:22px;line-height:24px;margin-bottom:3px;color:#dfc8ff}
 #liveFilterDialog .face-choice[aria-pressed=true]{border-color:#bd9cff;background:#514074;color:#fff}
 #liveFilterDialog input[type=range]{width:100%;min-height:28px}
-#liveFilterDialog label{margin:5px 0 0}
+#liveFilterDialog label{margin:4px 0 0}
+#liveFilterDialog #liveLooksPanel,#liveFilterDialog #liveFacePanel{display:flex;flex-direction:column}
+#liveFilterDialog #liveLooksPanel .filter-presets,#liveFilterDialog #liveFacePanel .face-choices{order:3}
+#liveFilterDialog #liveLooksPanel label,#liveFilterDialog #liveFacePanel label{order:1}
+#liveFilterDialog #liveLooksPanel input,#liveFilterDialog #liveFacePanel #liveFaceAmount{order:2}
+#liveFilterDialog #liveFaceStatus{order:4}
 #liveFilterDialog #liveFaceStatus{font-size:11px;margin:3px 0;line-height:1.25}
 #liveFilterDialog #resetLiveFilters{font-size:12px;margin-top:5px;color:#c6a9ff}
 #room .chat-send-status{align-self:flex-end;background:#252035d9;border-radius:13px;padding:4px 10px;font-size:11px;color:#e3d9ff}
-@media(max-width:720px){#room.filters-open .video-stage.video-stage{height:52%;max-height:none}#room.filters-open .watermark{top:auto;bottom:12px}}
+@media(max-width:720px){#room.filters-open .video-stage.video-stage{height:auto;max-height:none}#room.filters-open .watermark{top:auto;bottom:12px}}
 </style>
 </head>
 <body><main class="shell">
