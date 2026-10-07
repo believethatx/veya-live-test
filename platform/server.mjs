@@ -256,7 +256,7 @@ export function createApp({ media = createMedia() } = {}) {
           if (Date.now() - lastChat < 800) throw Error('Please slow down');
           const text = String(msg.text ?? '').trim().slice(0, 280); if (!text) return;
           lastChat = Date.now();
-          for (const peer of rooms.participants(entry.room)) send(peer, { type: 'chat', name: socket.user.displayName, text }); return;
+          for (const peer of rooms.participants(entry.room)) send(peer, { type: 'chat', userId: socket.user.id, name: socket.user.displayName, text }); return;
         }
         if (msg.type === 'kick') {
           const target = rooms.kick(socket, String(msg.userId));

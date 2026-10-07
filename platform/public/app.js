@@ -1,6 +1,9 @@
 import { Room, RoomEvent, Track, createLocalTracks } from '/livekit.js';
 const $ = id => document.getElementById(id);
 let socket, liveRoom, localTracks = [], cameraEffect = null, previewEffect = null, previewSwitch=Promise.resolve(), activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
+let pendingChat = null, chatStatusTimer, roomConfirmAction = null;
+function chatFeedback(message) { clearTimeout(chatStatusTimer); $('chatSendStatus').textContent=message; $('chatSendStatus').hidden=false; chatStatusTimer=setTimeout(()=>{$('chatSendStatus').hidden=true;},2500); }
+function confirmRoomAction(title, description, button, action) { roomConfirmAction=action; $('roomConfirmTitle').textContent=title; $('roomConfirmText').textContent=description; $('acceptRoomConfirm').textContent=button; $('roomConfirmDialog').showModal(); }
 let adminView='overview', adminOpenMember=null, adminSaving=false, managementData, previewTracks=[], previewGeneration=0, notificationItems=[];
 function textElement(tag,text){const e=document.createElement(tag);e.textContent=text;return e;}
 let config = { mediaConfigured: false, policyVersion: '' };
@@ -127,7 +130,7 @@ function updateWatermark() {
 function showRoom(room) {
   for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
-  $('viewersPanel').hidden = true; $('openViewers').hidden = role !== 'host'; $('leave').setAttribute('aria-label',role === 'host' ? 'End live' : 'Leave live');
+  $('viewersPanel').hidden = true; $('openViewers').hidden = role !== 'host'; $('leave').setAttribute('aria-label',role === 'host' ? 'End live' : 'Leave live'); $('chatSendStatus').hidden=true; pendingChat=null;
   $('mute').innerHTML = '◉ <span>Mic on</span>'; $('openLiveFilters').hidden=role!=='host' || !cameraFiltersSupported();$('chatLog').replaceChildren(); $('viewerList').replaceChildren(); $('viewerCount').textContent = '0';$('stageViewerCount').textContent='0';
   updateWatermark();
 }
@@ -178,6 +181,7 @@ function connect(firstMessage) {
         const item = document.createElement('li'); const name = document.createElement('span'); name.className = 'chat-name'; name.textContent = msg.name;
         const message = document.createElement('span'); message.className = 'chat-message'; message.textContent = msg.text;
         item.append(name, message); $('chatLog').append(item);
+        if (msg.userId === currentUser?.id && pendingChat === msg.text) { pendingChat=null; chatFeedback('Sent ✓'); }
         if ($('chatLog').children.length > 100) $('chatLog').firstChild.remove(); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
       if (msg.type === 'viewers') {$('viewerCount').textContent = msg.count;$('stageViewerCount').textContent=msg.count;}
@@ -186,7 +190,7 @@ function connect(firstMessage) {
         if (!msg.viewers.length) $('viewerList').textContent = 'Waiting for your first viewer.';
         for (const viewer of msg.viewers) {
           const row = document.createElement('div'); row.className = 'viewer'; const name = document.createElement('span'); name.textContent = viewer.name;
-          const button = document.createElement('button'); button.className = 'btn danger'; button.textContent = 'Remove'; button.onclick = () => send({ type: 'kick', userId: viewer.id }); row.append(name, button); $('viewerList').append(row);
+          const button = document.createElement('button'); button.className = 'btn danger'; button.textContent = 'Remove'; button.onclick = () => confirmRoomAction('Remove viewer?', `${viewer.name} will leave this live and its chat.`, 'Remove', () => { send({ type: 'kick', userId: viewer.id }); $('viewersPanel').hidden=true; status(`${viewer.name} removed from this live.`); }); row.append(name, button); $('viewerList').append(row);
         }
       }
       if (msg.type === 'reported') { $('reportDialog').close(); notice('Report received. Thank you for helping keep Veya safe.'); }
@@ -202,7 +206,7 @@ function cleanup() {
   const ws = socket; socket = null; ws?.close();
   for (const id of ['local', 'remote', 'remoteAudio']) $(id).srcObject = null;
   $('room').hidden = true; for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=!currentUser;if(currentUser){if(currentUser.onboarded)navigate(currentUser.access?.accessAllowed?'discover':'profile',true);else openProfileSetup();} $('hearAudio').hidden = true;
-  $('reportDialog').close(); $('joinDialog').close(); $('liveFilterDialog').close(); $('viewersPanel').hidden=true; $('chatLog').replaceChildren();
+  $('reportDialog').close(); $('joinDialog').close(); $('roomConfirmDialog').close(); closeLiveFilters(); $('viewersPanel').hidden=true; $('chatLog').replaceChildren(); pendingChat=null;clearTimeout(chatStatusTimer);
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
 $('start').onclick = async () => {
@@ -232,8 +236,10 @@ $('share').onclick = async () => {
 };
 $('mute').onclick = async () => { const track = localTracks.find(t => t.kind === Track.Kind.Audio); if (!track) return; await (track.isMuted ? track.unmute() : track.mute()); $('mute').innerHTML = track.isMuted ? '◉ <span>Mic off</span>' : '◉ <span>Mic on</span>'; $('mute').setAttribute('aria-label',track.isMuted?'Unmute mic':'Mute mic'); };
 $('hearAudio').onclick = async () => { await liveRoom?.startAudio(); $('hearAudio').hidden = true; };
-$('leave').onclick = cleanup; $('openViewers').onclick=()=>{$('viewersPanel').hidden=false;};$('closeViewers').onclick=()=>{$('viewersPanel').hidden=true;};
-$('chatForm').onsubmit = event => { event.preventDefault(); send({ type: 'chat', text: $('chatText').value }); $('chatText').value = ''; };
+$('cancelRoomConfirm').onclick=()=>{$('roomConfirmDialog').close();roomConfirmAction=null;};
+$('acceptRoomConfirm').onclick=()=>{const action=roomConfirmAction;roomConfirmAction=null;$('roomConfirmDialog').close();action?.();};
+$('leave').onclick = () => { if(role==='host')confirmRoomAction('End live?', 'This ends the live for everyone watching.', 'End live', cleanup); else cleanup(); }; $('openViewers').onclick=()=>{$('viewersPanel').hidden=false;};$('closeViewers').onclick=()=>{$('viewersPanel').hidden=true;};
+$('chatForm').onsubmit = event => { event.preventDefault(); const text=$('chatText').value.trim(); if(!text)return; if(socket?.readyState!==WebSocket.OPEN){chatFeedback('Not connected. Try again.');return;} pendingChat=text;send({ type: 'chat', text });$('chatText').value='';chatFeedback('Sending…'); };
 $('openReport').onclick = () => { $('reportDetails').value = ''; $('reportDialog').showModal(); };
 $('cancelReport').onclick = () => $('reportDialog').close();
 $('reportForm').onsubmit = event => { event.preventDefault(); send({ type: 'report', reason: $('reportReason').value, details: $('reportDetails').value }); };
@@ -440,6 +446,11 @@ const cameraLooks=[
 ];
 let cameraLook='none',cameraStrength=70,cameraSoftFocus=0,cameraAdjust={brightness:0,colour:0,contrast:0},cameraSwitch=Promise.resolve();
 const faceSettings={Eyes:0,Definition:0,Sparkle:0,Teeth:0,Nose:0,Forehead:0};
+let selectedFaceEffect='Eyes';
+const faceLabels={Eyes:'Bright eyes',Definition:'Eye definition',Sparkle:'Sparkle',Teeth:'Teeth whitening',Nose:'Nose shape',Forehead:'Forehead shape'};
+function updateFacePicker(){for(const button of $('liveFaceChoices').children)button.setAttribute('aria-pressed',String(button.dataset.effect===selectedFaceEffect));$('liveFaceSelected').textContent=faceLabels[selectedFaceEffect];$('liveFaceAmount').value=String(faceSettings[selectedFaceEffect]);$('liveFaceAmountValue').textContent=faceSettings[selectedFaceEffect]+'%';}
+for(const key of Object.keys(faceSettings)){const button=document.createElement('button');button.type='button';button.className='face-choice';button.dataset.effect=key;button.textContent=faceLabels[key];button.setAttribute('aria-label',faceLabels[key]+' effect');button.onclick=()=>{selectedFaceEffect=key;if(!faceSettings[key]){faceSettings[key]=50;updateCameraLookUI();void loadFaceTracker();scheduleCameraSwitch();}updateFacePicker();};$('liveFaceChoices').append(button);}
+$('liveFaceAmount').oninput=()=>{faceSettings[selectedFaceEffect]=Number($('liveFaceAmount').value);updateCameraLookUI();if(faceActive())void loadFaceTracker();scheduleCameraSwitch();};
 let faceTrackerPromise=null,faceTracker=null,faceLandmarks=null,faceLastTime=-1,faceLastRun=0;
 function faceActive(){return Object.values(faceSettings).some(Boolean);}
 function faceFiltersSupported(){return Boolean(document.createElement('canvas').getContext('webgl'));}
@@ -455,18 +466,19 @@ function detectFaceFrame(source){if(!faceActive()||!faceTracker||source.currentT
 function cameraEffectActive(){return cameraLook!=='none'||cameraSoftFocus>0||Object.values(cameraAdjust).some(Boolean)||faceActive();}
 function cameraFiltersSupported(){const canvas=document.createElement('canvas');return typeof canvas.captureStream==='function' && ('filter' in canvas.getContext('2d') || Boolean(document.createElement('canvas').getContext('webgl')));}
 function cameraFilterCSS(){const look=cameraLooks.find(x=>x.id===cameraLook)||cameraLooks[0],t=cameraStrength/100,[brightness,contrast,saturate,sepia,hue,mono]=look.values;const mix=value=>1+(value-1)*t;return `brightness(${mix(brightness)*(1+cameraAdjust.brightness/100)}) contrast(${mix(contrast)*(1+cameraAdjust.contrast/100)}) saturate(${mix(saturate)*(1+cameraAdjust.colour/100)}) sepia(${sepia*t}) hue-rotate(${hue*t}deg) grayscale(${mono*t}) blur(${cameraSoftFocus/100}px)`;}
-function updateCameraLookUI(){for(const id of ['studioFilters','liveFilters'])for(const button of $(id).children)button.setAttribute('aria-pressed',String(button.dataset.look===cameraLook));for(const id of ['studioFilterStrength','liveFilterStrength'])$(id).value=String(cameraStrength);for(const id of ['studioSoftFocus','liveSoftFocus'])$(id).value=String(cameraSoftFocus);for(const id of ['studioStrengthValue','liveStrengthValue'])$(id).textContent=cameraStrength+'%';for(const id of ['studioSoftValue','liveSoftValue'])$(id).textContent=cameraSoftFocus+'%';for(const key of ['Brightness','Colour','Contrast'])for(const prefix of ['studio','live']){$(prefix+key).value=String(cameraAdjust[key.toLowerCase()]);$(prefix+key+'Value').textContent=String(cameraAdjust[key.toLowerCase()]);}for(const key of Object.keys(faceSettings))for(const prefix of ['studio','live']){$(`${prefix}Face${key}`).value=String(faceSettings[key]);$(`${prefix}Face${key}Value`).textContent=faceSettings[key]+'%';}$('cameraPreview').style.filter=previewEffect?'none':cameraFilterCSS();}
+function updateCameraLookUI(){for(const id of ['studioFilters','liveFilters'])for(const button of $(id).children)button.setAttribute('aria-pressed',String(button.dataset.look===cameraLook));for(const id of ['studioFilterStrength','liveFilterStrength'])$(id).value=String(cameraStrength);for(const id of ['studioSoftFocus','liveSoftFocus'])$(id).value=String(cameraSoftFocus);for(const id of ['studioStrengthValue','liveStrengthValue'])$(id).textContent=cameraStrength+'%';for(const id of ['studioSoftValue','liveSoftValue'])$(id).textContent=cameraSoftFocus+'%';for(const key of ['Brightness','Colour','Contrast'])for(const prefix of ['studio','live']){$(prefix+key).value=String(cameraAdjust[key.toLowerCase()]);$(prefix+key+'Value').textContent=String(cameraAdjust[key.toLowerCase()]);}for(const key of Object.keys(faceSettings))for(const prefix of ['studio','live']){$(`${prefix}Face${key}`).value=String(faceSettings[key]);$(`${prefix}Face${key}Value`).textContent=faceSettings[key]+'%';}updateFacePicker();$('cameraPreview').style.filter=previewEffect?'none':cameraFilterCSS();}
 for(const container of ['studioFilters','liveFilters'])for(const look of cameraLooks){const button=document.createElement('button');button.type='button';button.className='filter-preset';button.dataset.look=look.id;button.setAttribute('aria-label',look.name+' filter');const swatch=document.createElement('i');swatch.style.background=look.swatch;swatch.setAttribute('aria-hidden','true');button.append(swatch,document.createTextNode(look.name));button.onclick=()=>{cameraLook=look.id;updateCameraLookUI();scheduleCameraSwitch();};$(container).append(button);}
 for(const [id,key] of [['studioFilterStrength','strength'],['liveFilterStrength','strength'],['studioSoftFocus','soft'],['liveSoftFocus','soft']])$(id).oninput=()=>{if(key==='strength')cameraStrength=Number($(id).value);else cameraSoftFocus=Number($(id).value);updateCameraLookUI();scheduleCameraSwitch();};
 for(const key of ['Brightness','Colour','Contrast'])for(const prefix of ['studio','live'])$(prefix+key).oninput=()=>{cameraAdjust[key.toLowerCase()]=Number($(prefix+key).value);updateCameraLookUI();scheduleCameraSwitch();};
 for(const key of Object.keys(faceSettings))for(const prefix of ['studio','live'])$(`${prefix}Face${key}`).oninput=()=>{faceSettings[key]=Number($(`${prefix}Face${key}`).value);updateCameraLookUI();if(faceActive())void loadFaceTracker();scheduleCameraSwitch();};
-if(!faceFiltersSupported()){faceStatus('Face effects are unavailable on this device.');for(const key of Object.keys(faceSettings))for(const prefix of ['studio','live'])$(`${prefix}Face${key}`).disabled=true;}
+if(!faceFiltersSupported()){faceStatus('Face effects are unavailable on this device.');for(const key of Object.keys(faceSettings))for(const prefix of ['studio','live'])$(`${prefix}Face${key}`).disabled=true;for(const button of $('liveFaceChoices').children)button.disabled=true;$('liveFaceAmount').disabled=true;}
 updateCameraLookUI();
 if(!cameraFiltersSupported()){$('filterSupport').textContent='Camera filters are unavailable on this browser; your original camera can still stream.';for(const id of ['studioFilters','studioFilterStrength','studioSoftFocus','studioBrightness','studioColour','studioContrast'])$(id).inert=true;}
 for(const id of ['resetStudioFilters','resetLiveFilters'])$(id).onclick=()=>{cameraLook='none';cameraStrength=70;cameraSoftFocus=0;cameraAdjust={brightness:0,colour:0,contrast:0};for(const key of Object.keys(faceSettings))faceSettings[key]=0;faceLandmarks=null;updateCameraLookUI();scheduleCameraSwitch();};
-function showFilterTab(face){$('liveLooksPanel').hidden=face;$('liveFacePanel').hidden=!face;$('liveLooksTab').setAttribute('aria-selected',String(!face));$('liveFaceTab').setAttribute('aria-selected',String(face));}
-$('liveLooksTab').onclick=()=>showFilterTab(false);$('liveFaceTab').onclick=()=>showFilterTab(true);
-$('openLiveFilters').onclick=()=>{$('liveFilterDialog').showModal();};$('closeLiveFilters').onclick=()=>$('liveFilterDialog').close();
+function showFilterTab(tab){for(const [name,panel] of [['Looks','liveLooksPanel'],['Face','liveFacePanel'],['Adjust','liveAdjustPanel']]){$(panel).hidden=name!==tab;$('live'+name+'Tab').setAttribute('aria-selected',String(name===tab));}}
+for(const name of ['Looks','Face','Adjust'])$('live'+name+'Tab').onclick=()=>showFilterTab(name);
+function closeLiveFilters(){$('liveFilterDialog').hidden=true;$('room').classList.remove('filters-open');}
+$('openLiveFilters').onclick=()=>{$('viewersPanel').hidden=true;$('liveFilterDialog').hidden=false;$('room').classList.add('filters-open');showFilterTab('Looks');};$('closeLiveFilters').onclick=closeLiveFilters;
 function makeGLFilter(canvas){
  const gl=canvas.getContext('webgl',{alpha:false,preserveDrawingBuffer:true});if(!gl)throw Error('WebGL unavailable');
  const shader=(type,code)=>{const sh=gl.createShader(type);gl.shaderSource(sh,code);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw Error('Filter shader failed');return sh;};
