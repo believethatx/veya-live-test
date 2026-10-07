@@ -13,6 +13,7 @@ import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from 
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
+import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -107,6 +108,21 @@ export function createApp({ media = createMedia() } = {}) {
         if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
         json(res,200,{testOnly:true,gifts:giftCatalog(true),audit:giftCatalogAudit()});return;
       }
+      if(url.pathname==='/api/progression' && req.method==='GET'){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+        const id=url.searchParams.get('id') || sessionUser.id;
+        publicProfile(sessionUser,id);
+        const {adjustments,rankExcluded,...visibleProgression}=progression(id);
+        json(res,200,{progression:visibleProgression});return;
+      }
+      if(url.pathname==='/api/leaderboard' && req.method==='GET'){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+        json(res,200,leaderboard(sessionUser,url.searchParams.get('board')||'hosts',url.searchParams.get('period')||'week'));return;
+      }
+      if(url.pathname==='/api/admin/progression' && req.method==='GET'){
+        if(!hasPermission(sessionUser,'progression')){json(res,403,{error:'Progression management access required'});return;}
+        const id=url.searchParams.get('id');json(res,200,{badges:BADGES,users:progressionUsers(sessionUser),audit:progressionAudit(sessionUser),progression:id?progression(id):null});return;
+      }
       if (req.url === '/api/admin/reports' && req.method === 'GET') {
         const user = userFromRequest(req);
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
@@ -149,6 +165,10 @@ export function createApp({ media = createMedia() } = {}) {
           if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
           const input=await jsonBody(req);
           json(res,200,{gift:updateGiftCatalog(sessionUser,String(input.giftId||''),input.points,input.enabled)});return;
+        }
+        if(req.url==='/api/admin/progression'){
+          if(!hasPermission(sessionUser,'progression')){json(res,403,{error:'Progression management access required'});return;}
+          json(res,200,{progression:updateProgression(sessionUser,await jsonBody(req))});return;
         }
         if (req.url === '/api/logout') {
           const user = userFromRequest(req); revokeSession(req);

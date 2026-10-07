@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS access_blocks (id TEXT PRIMARY KEY, kind TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS appeals (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', response TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS host_sessions (room_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, started_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, ended_at INTEGER);
 CREATE TABLE IF NOT EXISTS access_audit (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, created_at TEXT NOT NULL);`);
-export const PERMISSIONS=['testers','hosts','moderation','settings','appeals','profiles','gifts'];
+export const PERMISSIONS=['testers','hosts','moderation','settings','appeals','profiles','gifts','progression'];
 export const ownerIds=()=>String(process.env.ADMIN_USER_IDS || '').split(',').map(x=>x.trim()).filter(Boolean);
 export const isOwner=user=>Boolean(user && ownerIds().includes(user.id));
 export function permissionsFor(user){if(!user)return [];if(isOwner(user))return PERMISSIONS;if(db.prepare("SELECT id FROM access_blocks WHERE kind='account' AND value=? AND active=1 AND (expires_at IS NULL OR expires_at>?)").get(user.id,Date.now()))return [];const row=db.prepare('SELECT permissions FROM admin_permissions WHERE user_id=?').get(user.id);return row?JSON.parse(row.permissions):[];}

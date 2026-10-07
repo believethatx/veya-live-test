@@ -1,0 +1,54 @@
+import {test} from 'node:test';
+import {strict as assert} from 'node:assert';
+import {mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+process.env.DATA_FILE=join(mkdtempSync(join(tmpdir(),'veya-progression-')),'test.sqlite');
+const auth=await import('../auth.mjs');
+const access=await import('../access.mjs');
+const community=await import('../community.mjs');
+const progression=await import('../progression.mjs');
+const make=name=>{const u=auth.register({email:name+'@example.test',displayName:name,password:'a long test password',adult:true});return auth.saveProfile(u.id,{displayName:name,country:'EG',adult:true,bio:'',avatar:'',interests:[]});};
+const owner=make('Owner');process.env.ADMIN_USER_IDS=owner.id;
+const host=make('Host'),viewer=make('Viewer'),hidden=make('Hidden');
+for(const u of [host,viewer,hidden])access.manage(owner,{action:'tester',userId:u.id,approved:true});
+access.manage(owner,{action:'host',userId:host.id,status:'trial',days:7});
+test('levels and badges use real saved activity and retain separate host progress',()=>{
+ const first=progression.progression(viewer.id);assert.equal(first.viewer.number,1);assert.equal(first.badges.find(b=>b.id==='welcome').earned,true);assert.equal(first.badges.find(b=>b.id==='storyteller').earned,false);
+ community.createMoment(viewer,{caption:'First Moment',image:''});community.follow(host,viewer.id,true);
+ const next=progression.progression(viewer.id);assert.equal(next.viewer.xp,40);assert.equal(next.badges.find(b=>b.id==='storyteller').earned,true);assert.equal(next.counts.followers,1);
+ assert.equal(progression.progression(host.id).host.number,1);assert.equal(progression.progression(viewer.id).host,null);
+});
+test('weekly and all-time boards rank persisted activity, hide invisible accounts and reset at UTC week boundary',()=>{
+ community.createMoment(host,{caption:'Host Moment',image:''});community.createMoment(hidden,{caption:'Hidden Moment',image:''});
+ const now=Date.now();const weekly=progression.leaderboard(viewer,'community','week');assert.equal(weekly.entries[0].score>=25,true);assert.equal(weekly.entries.some(e=>e.id===hidden.id),true);
+ assert.equal(progression.leaderboard(viewer,'hosts','week').entries.length,0);
+ const session={id:'live-one'};access.startHours(session,host);access.endHours(session);
+ // An ended, zero-duration live has no ranking score.
+ assert.equal(progression.leaderboard(viewer,'hosts','all').entries.length,0);
+ const db=new DatabaseSync(process.env.DATA_FILE);
+ db.prepare('UPDATE host_sessions SET started_at=?,last_seen=?,ended_at=? WHERE room_id=?').run(now-90*60000,now-30*60000,now-30*60000,session.id);
+ assert.equal(progression.leaderboard(viewer,'hosts','week').entries[0].score,60);
+ assert.equal(progression.progression(host.id).badges.find(b=>b.id==='live_hour').earned,true);
+ db.prepare('UPDATE moments SET created_at=? WHERE user_id=?').run(now-8*86400000,hidden.id);
+ assert.equal(progression.leaderboard(viewer,'community','week').entries.some(e=>e.id===hidden.id),false);
+ assert.equal(progression.leaderboard(viewer,'community','all').entries.some(e=>e.id===hidden.id),true);
+});
+test('scoped admin corrections and exclusions are enforced and auditable',()=>{
+ const scoped=make('Scoped');access.manage(owner,{action:'permissions',userId:scoped.id,permissions:['progression']});
+ assert.throws(()=>progression.updateProgression(viewer,{userId:host.id,badgeId:'regular_host',state:'award'}),/access required/);
+ progression.updateProgression(scoped,{userId:host.id,badgeId:'regular_host',state:'award'});
+ assert.equal(progression.progression(host.id).badges.find(b=>b.id==='regular_host').manual,true);
+ progression.updateProgression(scoped,{userId:host.id,role:'host',adjustment:370});
+ assert.equal(progression.progression(host.id).adjustments.host,370);
+ assert.throws(()=>progression.updateProgression(scoped,{userId:host.id,role:'viewer',adjustment:2.5}),/whole XP/);
+ progression.updateProgression(scoped,{userId:host.id,badgeId:'regular_host',state:'revoke'});
+ assert.equal(progression.progression(host.id).badges.find(b=>b.id==='regular_host').earned,false);
+ progression.updateProgression(scoped,{userId:host.id,rankExcluded:true});
+ assert.equal(progression.leaderboard(viewer,'hosts','all').entries.some(e=>e.id===host.id),false);
+ assert.throws(()=>progression.updateProgression(scoped,{userId:owner.id,badgeId:'welcome',state:'revoke'}),/Owner/);
+ assert.equal(progression.progressionAudit(scoped).length,4);
+ access.manage(owner,{action:'block',userId:hidden.id,kind:'account',reason:'Review'});
+ assert.equal(progression.leaderboard(viewer,'community','all').entries.some(e=>e.id===hidden.id),false);
+});
