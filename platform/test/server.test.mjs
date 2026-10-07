@@ -35,9 +35,10 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   assert.equal((await request('/api/admin/reports', a.cookie)).status, 403);
   process.env.ADMIN_USER_IDS = owner.user.id;manage(owner.user,{action:'tester',userId:a.user.id,approved:true});manage(owner.user,{action:'tester',userId:b.user.id,approved:true});
   const host = await connect(owner);
-  assert.match((await exchange(host, { type: 'create', title: 'A real live room', category: 'Chat' }, 'error')).message, /Accept/);
+  assert.match((await exchange(host, { type: 'create', title: 'A real live room' }, 'error')).message, /Accept/);
   const consent = { acceptRules: true, policyVersion: POLICY_VERSION };
-  const { room } = await exchange(host, { type: 'create', title: 'A real live room', category: 'Chat', ...consent }, 'created');
+  assert.match((await exchange(host, { type: 'create', title: '  ', ...consent }, 'error')).message, /room title/);
+  const { room } = await exchange(host, { type: 'create', title: 'A real live room', ...consent }, 'created');
   assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms.length, 0);
   assert.match((await exchange(host, { type: 'ready' }, 'error')).message, /camera is not live/);
   assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms.length, 0);
@@ -45,7 +46,7 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   const viewerA = await connect(a), viewerB = await connect(b);
   await exchange(viewerA, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerA, { type: 'ready' }, 'ready');
   await exchange(viewerB, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerB, { type: 'ready' }, 'ready');
-  assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms[0].viewers, 2);
+  assert.equal((await (await request('/api/rooms', a.cookie)).json()).rooms[0].viewers, 2);assert.equal('category' in (await (await request('/api/rooms', a.cookie)).json()).rooms[0], false);
   const chat = next(viewerB, 'chat'); await exchange(viewerA, { type: 'chat', text: '<script>not executable</script>' }, 'chat'); assert.equal((await chat).text, '<script>not executable</script>');
   const report = await exchange(viewerB, { type: 'report', reason: 'Recording or screenshots', details: 'A viewer was recording.' }, 'reported');
   const reports = await (await request('/api/admin/reports', owner.cookie)).json(); assert.equal(reports.reports[0].id, report.id);

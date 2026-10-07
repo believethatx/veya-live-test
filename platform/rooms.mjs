@@ -1,19 +1,17 @@
 import { randomBytes } from 'node:crypto';
-const categories = new Set(['Chat', 'Music', 'Gaming', 'Other']);
 export class RoomRegistry {
   constructor() { this.rooms = new Map(); this.peers = new Map(); }
   list() {
     return [...this.rooms.values()].filter(r => r.live).map(r => ({
-      id: r.id, title: r.title, category: r.category, hostId:r.hostId, hostName: r.hostName, hostAvatar: r.host.user.avatar || '',
+      id: r.id, title: r.title, hostId:r.hostId, hostName: r.hostName, hostAvatar: r.host.user.avatar || '',
       viewers: [...r.viewers].filter(s => this.peers.get(s)?.ready).length, startedAt: r.startedAt,
     }));
   }
-  create(socket, title, category) {
+  create(socket, title) {
     this.assertFree(socket);
     title = String(title ?? '').trim().slice(0, 70);
-    if (title.length < 3) throw Error('Enter a room title');
-    if (!categories.has(category)) throw Error('Choose a valid category');
-    const room = { id: randomBytes(12).toString('hex'), title, category,
+    if (title.length < 3) throw Error('Enter a room title with at least 3 characters');
+    const room = { id: randomBytes(12).toString('hex'), title,
       hostName: socket.user.displayName, hostId: socket.user.id,
       startedAt: new Date().toISOString(), host: socket, viewers: new Set(), blocked: new Set(), live: false };
     this.rooms.set(room.id, room); this.peers.set(socket, { room, role: 'host', ready: false });

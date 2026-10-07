@@ -29,6 +29,6 @@ test('account, phone and IP blocks persist, expire, allow appeals, and cannot su
 test('viewer cannot bypass host approval through direct WebSocket messages',async()=>{
  const viewer=profile(account('SocketViewer'));access.manage(owner,{action:'tester',userId:viewer.id,approved:true});const cookie=`veya_session=${auth.createSession(viewer.id)}`;
  const {server}=createApp({media:{configured:true,token:async()=>{throw Error('Should never issue token');}}});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;const ws=new WebSocket(base.replace('http','ws')+'/signal',{headers:{Cookie:cookie,Origin:base}});
- try{await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j);});const reply=new Promise((r,j)=>{const timer=setTimeout(()=>j(Error('No rejection')),3000);ws.once('message',m=>{clearTimeout(timer);r(JSON.parse(m));});});ws.send(JSON.stringify({type:'create',title:'Bypass attempt',category:'Chat',acceptRules:true,policyVersion:POLICY_VERSION}));assert.match((await reply).message,/host approval/);}
+ try{await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j);});const reply=new Promise((r,j)=>{const timer=setTimeout(()=>j(Error('No rejection')),3000);ws.once('message',m=>{clearTimeout(timer);r(JSON.parse(m));});});ws.send(JSON.stringify({type:'create',title:'Bypass attempt',acceptRules:true,policyVersion:POLICY_VERSION}));assert.match((await reply).message,/host approval/);}
  finally{ws.terminate();await new Promise(r=>server.close(r));}
 });

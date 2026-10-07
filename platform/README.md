@@ -61,7 +61,7 @@ Status: automated security and local browser checks cover code behavior. Google 
 
 New and existing accounts without a completed profile enter a two-step setup: display name, optional photo/bio, explicit 18+ acknowledgement when needed, then optional interests. Profiles persist in the existing SQLite volume. Client photos are cropped and re-encoded to 256px JPEG; the API caps the request and permits only raster JPG/PNG data with matching signatures. No SVG or remote photo URL is accepted. Editing is authenticated, origin checked and blocked while that account has a live room.
 
-Explore lists real live rooms, with category/search filters and selected interests sorted first. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live has its own setup screen. Room privacy, moderation and media permissions are retained.
+Explore lists real live rooms with title and host search. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live requires a room title and has its own setup screen. Room privacy, moderation and media permissions are retained.
 
 ## Tester and host access
 

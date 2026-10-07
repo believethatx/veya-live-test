@@ -236,7 +236,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (msg.type === 'create' || msg.type === 'join') {
           if (!media.configured) throw Error('Live video is not connected yet');
           if (msg.policyVersion !== POLICY_VERSION || msg.acceptRules !== true) throw Error('Accept the room privacy rules first');
-          const room = msg.type === 'create' ? rooms.create(socket, msg.title, msg.category) : rooms.join(socket, msg.roomId);
+          const room = msg.type === 'create' ? rooms.create(socket, msg.title) : rooms.join(socket, msg.roomId);
           try {
             const credentials = await media.token(socket.user, room, msg.type === 'create' ? 'host' : 'viewer');
             if (socket.readyState !== WebSocket.OPEN || !rooms.peer(socket)) { if (msg.type === 'create') await media.end(room); return; }

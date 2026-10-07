@@ -14,9 +14,8 @@ async function api(path, input) {
   const response = await fetch(path, input === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
   const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
 }
-const interests = ['Chat', 'Music', 'Gaming', 'Other'];
 let profileAdminTarget=null,draftBanner='',publicProfileId=null,linkedProfile=/^\/profile\/([0-9a-f]{32})$/.exec(location.pathname)?.[1] || sessionStorage.getItem('veyaProfileLink');
-let directoryPeople=[], followingPeople=[], connectionId=null, connectionKind='following', connectionNext=null, connectionVersion=0, peopleVersion=0, peopleSearchTimer, allRooms = [], selectedCategory = 'All', draftAvatar = '', editingProfile = false;
+let directoryPeople=[], followingPeople=[], connectionId=null, connectionKind='following', connectionNext=null, connectionVersion=0, peopleVersion=0, peopleSearchTimer, allRooms = [], draftAvatar = '', editingProfile = false;
 function paintAvatar(element, name, avatar = '') {
   element.replaceChildren();
   if (avatar) {const img = document.createElement('img');img.src = avatar;img.alt = '';element.append(img);}
@@ -42,7 +41,7 @@ function navigate(destination, force = false) {
 }
 function renderRooms() {
   const query = $('roomSearch').value.trim().toLowerCase();
-  const matches = allRooms.filter(r => (selectedCategory === 'All' || r.category === selectedCategory) && `${r.title} ${r.hostName}`.toLowerCase().includes(query));
+  const matches = allRooms.filter(r => `${r.title} ${r.hostName}`.toLowerCase().includes(query));
   $('roomCount').hidden=!matches.length;
   $('roomCount').textContent = `${matches.length} live ${matches.length === 1 ? 'room' : 'rooms'}`;
   $('rooms').replaceChildren();$('rooms').className = 'rooms-grid';
@@ -50,8 +49,8 @@ function renderRooms() {
     const empty = document.createElement('div');empty.className='empty';
     const icon=document.createElement('div');icon.className='empty-icon';icon.textContent='✦';icon.setAttribute('aria-hidden','true');
     const title=document.createElement('h2');title.textContent=allRooms.length ? 'No lives match just yet.' : 'It’s quiet right now';
-    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another category or search for a different host.' : 'Follow a host below to catch their next live.';
-    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear filters' : 'Browse hosts';button.onclick=()=>{if(allRooms.length){selectedCategory='All';$('roomSearch').value='';$('clearRoomSearch').hidden=true;updateFilters();renderRooms();renderPeople(false);}else $('hostDirectory').scrollIntoView({behavior:'smooth'});};
+    const text=document.createElement('p');text.textContent=allRooms.length ? 'Try another search or look for a different host.' : 'Follow a host below to catch their next live.';
+    const button=document.createElement('button');button.className='btn';button.textContent=allRooms.length ? 'Clear search' : 'Browse hosts';button.onclick=()=>{if(allRooms.length){$('roomSearch').value='';$('clearRoomSearch').hidden=true;renderRooms();renderPeople(false);}else $('hostDirectory').scrollIntoView({behavior:'smooth'});};
     const copy=document.createElement('div');copy.append(title,text);empty.append(icon,copy);if(allRooms.length)empty.append(button);$('rooms').append(empty);return;
   }
   for (const room of matches) {
@@ -60,12 +59,10 @@ function renderRooms() {
     const badge=document.createElement('span');badge.className='live-label';badge.textContent='LIVE';
     const avatar=document.createElement('div');avatar.className='avatar';paintAvatar(avatar,room.hostName,room.hostAvatar);cover.append(badge,avatar);
     const copy=document.createElement('div');copy.className='room-copy';const name=document.createElement('strong');name.textContent=room.title;
-    const detail=document.createElement('small');detail.textContent=`${room.hostName} · ${room.category} · ${room.viewers} viewers`;
+    const detail=document.createElement('small');detail.textContent=`${room.hostName} · ${room.viewers} viewers`;
     copy.append(name,detail);button.append(cover,copy);button.onclick=()=>requestJoin(room.id);$('rooms').append(button);
   }
 }
-function updateFilters() {for(const button of $('categoryFilters').children)button.setAttribute('aria-pressed',String(button.dataset.category===selectedCategory));}
-for(const category of ['All',...interests]) {const button=document.createElement('button');button.className='filter-chip';button.dataset.category=category;button.textContent=category;button.onclick=()=>{selectedCategory=category;updateFilters();renderRooms();};$('categoryFilters').append(button);}updateFilters();
 $('roomSearch').oninput=()=>{renderRooms();$('clearRoomSearch').hidden=!$('roomSearch').value;clearTimeout(peopleSearchTimer);peopleSearchTimer=setTimeout(()=>void loadPeople(false),180);};$('clearRoomSearch').onclick=()=>{$('roomSearch').value='';$('roomSearch').oninput();$('roomSearch').focus();};
 async function refreshRooms() {
   if (activeRoom || !currentUser || $('discover').hidden) return;
@@ -209,17 +206,22 @@ function cleanup() {
   $('reportDialog').close(); $('joinDialog').close(); $('roomConfirmDialog').close(); closeLiveFilters(); $('viewersPanel').hidden=true; $('chatLog').replaceChildren(); pendingChat=null;clearTimeout(chatStatusTimer);
   history.replaceState(null, '', location.pathname); refreshRooms();
 }
+function startFieldError(id,message){$(id).textContent=message;$(id).hidden=!message;}
+$('title').oninput=()=>{startFieldError('titleError','');$('title').removeAttribute('aria-invalid');startFieldError('startError','');};
+$('hostRules').onchange=()=>{if($('hostRules').checked)startFieldError('hostRulesError','');};
 $('start').onclick = async () => {
-  if (busy) return; notice('');
-  if (!$('hostRules').checked) { notice('Accept the room privacy rules before going live.'); return; }
-  if (!config.mediaConfigured) { notice('Live video setup is still pending.'); return; }
+  if (busy) return; notice('');startFieldError('titleError','');startFieldError('hostRulesError','');startFieldError('startError','');
+  const title=$('title').value.trim();
+  if (title.length<3) {startFieldError('titleError',title?'Use at least 3 characters for the room title.':'Enter a room title to go live.');$('title').setAttribute('aria-invalid','true');$('title').focus();return;}
+  $('title').removeAttribute('aria-invalid');
+  if (!$('hostRules').checked) {startFieldError('hostRulesError','Accept the room rules before going live.');$('hostRules').focus();return;}
+  if (!config.mediaConfigured) {startFieldError('startError','Live video is not connected yet. Try again later.');return;}
   if(!currentUser.access?.accessAllowed || !currentUser.access?.canHost){navigate('profile');notice('Streaming requires host approval.');return;}
   busy = true; $('start').disabled = true; role = 'host';
   try {
-    if ($('title').value.trim().length < 3) throw Error('Enter a room title of at least 3 characters.');
     stopPreview();localTracks = await createLocalTracks(deviceOptions());
-    await connect({ type: 'create', title: $('title').value, category: $('category').value, acceptRules: true, policyVersion: config.policyVersion });
-  } catch (error) { cleanup(); notice(error.name === 'NotAllowedError' ? 'Allow camera and microphone access to host.' : error.message); }
+    await connect({ type: 'create', title, acceptRules: true, policyVersion: config.policyVersion });
+  } catch (error) { const message=error.name === 'NotAllowedError' ? 'Allow camera and microphone access, then try again.' : error.message;cleanup();navigate('studio',true);startFieldError('startError',message); }
   finally { busy = false; updateAccount(currentUser); }
 };
 $('cancelJoin').onclick = () => $('joinDialog').close();
