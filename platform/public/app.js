@@ -3,8 +3,23 @@ const $ = id => document.getElementById(id);
 let socket, liveRoom, localTracks = [], cameraEffect = null, previewEffect = null, previewSwitch=Promise.resolve(), activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
 let pendingChat = null, chatStatusTimer, roomConfirmAction = null;
 let liveParticipants=[],giftPending=null,giftWallet=null;
+const giftIds=new Set(['heart','star','flower','crown']);
+const giftArt=id=>`/gifts/${giftIds.has(id)?id:'heart'}.svg`;
+let giftQueue=[],giftCelebrationTimer=null,giftAnimating=false;
+function resetGiftCelebration(){clearTimeout(giftCelebrationTimer);giftCelebrationTimer=null;giftQueue=[];giftAnimating=false;$('giftCelebration').hidden=true;}
+function playNextGift(){
+  if(giftAnimating||!activeRoom||!giftQueue.length)return;
+  giftAnimating=true;const gift=giftQueue.shift(),card=$('giftCelebration');
+  card.dataset.gift=giftIds.has(gift.giftId)?gift.giftId:'heart';
+  $('giftCelebrationArt').src=giftArt(gift.giftId);
+  $('giftCelebrationTitle').textContent=gift.gift;
+  $('giftCelebrationDetail').textContent=`${gift.senderName} sent a gift to ${gift.recipientName}`;
+  card.hidden=false;
+  giftCelebrationTimer=setTimeout(()=>{card.hidden=true;giftAnimating=false;playNextGift();},2600);
+}
+function queueGiftCelebration(gift){giftQueue.push(gift);if(giftQueue.length>4)giftQueue.shift();playNextGift();}
 function renderGiftRecipients(){const select=$('giftRecipient'),selected=select.value;select.replaceChildren();for(const person of liveParticipants.filter(p=>p.id!==currentUser?.id)){const option=document.createElement('option');option.value=person.id;option.textContent=person.name;select.append(option);}if([...select.options].some(o=>o.value===selected))select.value=selected;$('giftStatus').textContent=select.options.length?'':'No one else is in this live yet.';renderGiftChoices();}
-function renderGiftChoices(){const target=$('giftChoices');target.replaceChildren();for(const gift of giftWallet?.gifts || []){const button=document.createElement('button');button.type='button';button.className='gift-choice';button.disabled=Boolean(giftPending)||!$('giftRecipient').value||giftWallet.balance<gift.points;button.setAttribute('aria-label',`Send ${gift.name} for ${gift.points} test credits`);const icon=document.createElement('strong');icon.textContent=gift.icon;const name=document.createElement('span');name.textContent=gift.name;const cost=document.createElement('small');cost.textContent=gift.points+' credits';button.append(icon,name,cost);button.onclick=()=>{const recipient=liveParticipants.find(p=>p.id===$('giftRecipient').value);if(!recipient)return;confirmRoomAction('Send test gift?',`Send ${gift.name} to ${recipient.name} for ${gift.points} test credits?`, 'Send gift',()=>{giftPending=crypto.randomUUID().replaceAll('-','');$('giftStatus').textContent='Sending gift…';send({type:'gift',giftId:gift.id,recipientId:recipient.id,requestId:giftPending});renderGiftChoices();});};target.append(button);}}
+function renderGiftChoices(){const target=$('giftChoices');target.replaceChildren();for(const gift of giftWallet?.gifts || []){const button=document.createElement('button');button.type='button';button.className='gift-choice';button.dataset.gift=gift.id;button.disabled=Boolean(giftPending)||!$('giftRecipient').value||giftWallet.balance<gift.points;button.setAttribute('aria-label',`Send ${gift.name} for ${gift.points} test credits`);const art=document.createElement('img');art.src=giftArt(gift.id);art.alt='';const copy=document.createElement('span');copy.className='gift-card-copy';const name=document.createElement('strong');name.textContent=gift.name;const cost=document.createElement('small');cost.textContent=gift.points+' credits';copy.append(name,cost);button.append(art,copy);button.onclick=()=>{const recipient=liveParticipants.find(p=>p.id===$('giftRecipient').value);if(!recipient)return;confirmRoomAction('Send test gift?',`Send ${gift.name} to ${recipient.name} for ${gift.points} test credits?`, 'Send gift',()=>{giftPending=crypto.randomUUID().replaceAll('-','');$('giftStatus').textContent='Sending gift…';send({type:'gift',giftId:gift.id,recipientId:recipient.id,requestId:giftPending});renderGiftChoices();});};target.append(button);}}
 async function loadGiftWallet(){const {wallet}=await api('/api/gifts/wallet');giftWallet=wallet;$('giftBalance').textContent=String(wallet.balance);renderGiftChoices();return wallet;}
 function chatFeedback(message) { clearTimeout(chatStatusTimer); $('chatSendStatus').textContent=message; $('chatSendStatus').hidden=false; chatStatusTimer=setTimeout(()=>{$('chatSendStatus').hidden=true;},2500); }
 function confirmRoomAction(title, description, button, action) { roomConfirmAction=action; $('roomConfirmTitle').textContent=title; $('roomConfirmText').textContent=description; $('acceptRoomConfirm').textContent=button; $('roomConfirmDialog').showModal(); }
@@ -129,6 +144,7 @@ function updateWatermark() {
   $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
 }
 function showRoom(room) {
+  resetGiftCelebration();
   for(const id of ['discover','profile','studio','onboarding','following','updates','hostHub','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
   $('viewersPanel').hidden = true;$('giftPanel').hidden=true;liveParticipants=[];giftPending=null; $('openViewers').hidden = role !== 'host'; $('leave').setAttribute('aria-label',role === 'host' ? 'End live' : 'Leave live'); $('chatSendStatus').hidden=true; pendingChat=null;
@@ -187,7 +203,7 @@ function connect(firstMessage) {
       }
       if(msg.type==='participants'){liveParticipants=msg.participants;renderGiftRecipients();}
       if(msg.type==='gift'){
-        const item=document.createElement('li');item.className='room-gift';item.textContent=`${msg.senderName} sent ${msg.icon} ${msg.gift} to ${msg.recipientName}`;$('chatLog').append(item);if($('chatLog').children.length>100)$('chatLog').firstChild.remove();$('chatLog').scrollTop=$('chatLog').scrollHeight;
+        const item=document.createElement('li');item.className='room-gift';const art=document.createElement('img');art.src=giftArt(msg.giftId);art.alt='';item.append(art,document.createTextNode(`${msg.senderName} sent ${msg.icon} ${msg.gift} to ${msg.recipientName}`));$('chatLog').append(item);if($('chatLog').children.length>100)$('chatLog').firstChild.remove();$('chatLog').scrollTop=$('chatLog').scrollHeight;queueGiftCelebration(msg);
       }
       if(msg.type==='gift-sent' && msg.requestId===giftPending){giftPending=null;if(giftWallet)giftWallet.balance=msg.balance;$('giftBalance').textContent=String(msg.balance);$('giftStatus').textContent='Gift sent ✓';renderGiftChoices();}
       if(msg.type==='gift-error' && msg.requestId===giftPending){giftPending=null;$('giftStatus').textContent=msg.message;renderGiftChoices();}
@@ -208,6 +224,7 @@ function connect(firstMessage) {
   });
 }
 function cleanup() {
+  resetGiftCelebration();
   stopPreview();stopCameraEffect();activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
@@ -434,7 +451,7 @@ async function loadHostHub(){try{
  $('hostSessions').replaceChildren();for(const session of d.sessions){const row=document.createElement('div');row.className='host-session';const copy=document.createElement('div');copy.append(textElement('strong',new Date(session.startedAt).toLocaleString()),textElement('span',session.endedAt?'Ended':'Active / last connected'));const duration=textElement('span',`${Math.max(0,Math.round((session.lastSeen-session.startedAt)/60000))} min`);row.append(copy,duration);$('hostSessions').append(row);}if(!d.sessions.length){const empty=textElement('p','Your live sessions will appear here after you go live.');empty.className='profile-empty';$('hostSessions').append(empty);}
  }catch(e){notice(e.message);}}
 $('hostHubBack').onclick=()=>navigate('profile');
-$('profileTestGifts').ontoggle=async()=>{if(!$('profileTestGifts').open)return;try{const wallet=await loadGiftWallet();$('profileGiftSummary').textContent=`${wallet.balance} credits available · ${wallet.sentPoints} sent · ${wallet.receivedPoints} received`;$('profileGiftHistory').replaceChildren();for(const x of wallet.recent){const direction=x.senderId===currentUser.id?`Sent ${x.gift} to ${x.recipientName}`:`Received ${x.gift} from ${x.senderName}`;$('profileGiftHistory').append(textElement('p',`${direction} · ${x.points} points · ${new Date(x.createdAt).toLocaleString()}`));}if(!wallet.recent.length)$('profileGiftHistory').append(textElement('p','No test gifts yet.'));}catch(error){$('profileGiftSummary').textContent=error.message;}};
+$('profileTestGifts').ontoggle=async()=>{if(!$('profileTestGifts').open)return;try{const wallet=await loadGiftWallet();$('profileGiftSummary').textContent=`${wallet.balance} credits available · ${wallet.sentPoints} sent · ${wallet.receivedPoints} received`;$('profileGiftHistory').replaceChildren();for(const x of wallet.recent){const direction=x.senderId===currentUser.id?`Sent ${x.gift} to ${x.recipientName}`:`Received ${x.gift} from ${x.senderName}`;const row=document.createElement('p');row.className='gift-history-row';const art=document.createElement('img');art.src=giftArt(x.giftId);art.alt='';const detail=document.createElement('span');detail.textContent=`${direction} · ${x.points} points · ${new Date(x.createdAt).toLocaleString()}`;row.append(art,detail);$('profileGiftHistory').append(row);}if(!wallet.recent.length)$('profileGiftHistory').append(textElement('p','No test gifts yet.'));}catch(error){$('profileGiftSummary').textContent=error.message;}};
 $('hubStart').onclick=()=>navigate('studio');$('hubApply').onclick=()=>$('applyHost').click();
 function deviceOptions(){return {audio:$('micDevice').value?{deviceId:{exact:$('micDevice').value}}:true,video:{...($('cameraDevice').value?{deviceId:{exact:$('cameraDevice').value}}:{facingMode:'user'}),resolution:{width:640,height:480,frameRate:24}}};}
 const cameraLooks=[

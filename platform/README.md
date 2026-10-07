@@ -63,7 +63,7 @@ New and existing accounts without a completed profile enter a two-step setup: di
 
 Explore lists real live rooms with title and host search. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live requires a room title and has its own setup screen. Room privacy, moderation and media permissions are retained.
 
-Live gifts use an isolated test-credit ledger. Each approved member starts with 250 free test credits, can send a preset gift to another current room participant, and can see their balance and history in Profile. Hosts see test gifts received in their host hub; moderators can inspect the latest gift transactions. Transfers are atomic and idempotent. Test credits and gifts have no monetary value, purchase flow, conversion or payout.
+Live gifts use an isolated test-credit ledger. Each approved member starts with 250 free test credits, can send one of four illustrated gifts to another current room participant, and can see their balance and illustrated history in Profile. Sending requires confirmation; a successful gift briefly animates in the camera view of everyone in the room and appears in room chat. Hosts see test gifts received in their host hub; moderators can inspect the latest gift transactions. Transfers are atomic and idempotent. Test credits and gifts have no monetary value, purchase flow, conversion or payout.
 
 ## Tester and host access
 
