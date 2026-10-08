@@ -11,7 +11,7 @@ import { RoomRegistry } from './rooms.mjs';
 import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
-import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
+import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userById, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
 import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
@@ -152,7 +152,7 @@ export function createApp({ media = createMedia() } = {}) {
         json(res,200,url.pathname==='/api/conversations'?{conversations:conversations(sessionUser)}:conversation(sessionUser,url.searchParams.get('userId')));return;
       }
       if(url.pathname==='/api/admin/profile' && req.method==='GET'){json(res,200,{profile:adminProfile(sessionUser,url.searchParams.get('id'))});return;}
-      if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}json(res,200,management(sessionUser));return;}
+      if(req.url==='/api/admin/management' && req.method==='GET'){if(!isAdmin(sessionUser)){json(res,403,{error:'Admin access required'});return;}const data=management(sessionUser);if(hasPermission(sessionUser,'hosts'))for(const m of data.members){if(!['trial','approved','review'].includes(m.host_status))continue;const u=userById(m.id);if(!u)continue;const dashboard=hostDashboard(u,req);m.hostActivity={weekHours:dashboard.activity.weekHours,qualifyingHours:dashboard.activity.qualifyingHours,weekDays:dashboard.activity.weekDays,totalHours:dashboard.stats.hours,requirements:dashboard.trial.requirements};}json(res,200,data);return;}
       if (req.url === '/api/livekit/webhook' && req.method === 'POST') {
         try {
           const event = await media.webhook(await body(req, 65536), req.headers.authorization);
