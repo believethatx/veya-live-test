@@ -12,7 +12,7 @@ import { createMedia } from './media.mjs';
 import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport, reportMoment, listMomentReports, resolveMomentReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userById, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
-import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
+import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog,grantTestCredits,testGiftGrantHistory} from './gifts.mjs';
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
 import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
 import {CallRegistry} from './calls.mjs';
@@ -111,7 +111,7 @@ export function createApp({ media = createMedia() } = {}) {
       }
       if(req.url==='/api/admin/gift-catalog' && req.method==='GET'){
         if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
-        json(res,200,{testOnly:true,gifts:giftCatalog(true),audit:giftCatalogAudit()});return;
+        json(res,200,{testOnly:true,gifts:giftCatalog(true),audit:giftCatalogAudit(),grants:testGiftGrantHistory()});return;
       }
       if(url.pathname==='/api/progression' && req.method==='GET'){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
@@ -185,6 +185,11 @@ export function createApp({ media = createMedia() } = {}) {
           if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
           const input=await jsonBody(req);
           json(res,200,{gift:updateGiftCatalog(sessionUser,String(input.giftId||''),input.points,input.enabled)});return;
+        }
+        if(req.url==='/api/admin/test-credits'){
+          if(!hasPermission(sessionUser,'gifts')){json(res,403,{error:'Gift management access required'});return;}
+          const input=await jsonBody(req);const id=String(input.userId||'');if(!userById(id))throw Error('Account not found');
+          json(res,200,grantTestCredits(sessionUser,id,input.points,input.reason));return;
         }
         if(req.url==='/api/admin/progression'){
           if(!hasPermission(sessionUser,'progression')){json(res,403,{error:'Progression management access required'});return;}

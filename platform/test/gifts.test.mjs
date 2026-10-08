@@ -7,7 +7,7 @@ import {join} from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'veya-gifts-'));
 process.env.DATA_FILE=join(directory,'test.sqlite');
 const {register}=await import('../auth.mjs');
-const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS,giftCatalog,updateGiftCatalog}=await import('../gifts.mjs');
+const {sendTestGift,testGiftWallet,testGiftAdminHistory,TEST_GIFTS,giftCatalog,updateGiftCatalog,grantTestCredits,testGiftGrantHistory}=await import('../gifts.mjs');
 test('catalog includes illustrated, flag and classic gifts with distinct IDs',()=>{
  assert.equal(TEST_GIFTS.length,51);
  assert.equal(new Set(TEST_GIFTS.map(g=>g.id)).size,51);
@@ -54,5 +54,15 @@ test('admin availability and price apply to new sends while history keeps its pr
  assert.equal(testGiftWallet(other).recent.find(e=>e.id===original.event.id).points,25);
  assert.throws(()=>updateGiftCatalog(actor,'flag_sa',0,true),/1 to 250/);
  assert.throws(()=>updateGiftCatalog(actor,'unknown',25,true),/not found/);
+});
+test('admin test-credit grants increase only wallet balance and leave an audit trail',()=>{
+ const actor={id:'admin'};assert.throws(()=>grantTestCredits(actor,sender.id,0,'Test'),/1 to 10,000/);
+ assert.throws(()=>grantTestCredits(actor,sender.id,250,''),/reason/);
+ const result=grantTestCredits(actor,sender.id,250,'Continue testing gifts');assert.equal(result.balance,255);assert.equal(result.testOnly,true);
+ assert.equal(testGiftWallet(sender).sentPoints,245);assert.equal(testGiftWallet(sender).receivedPoints,0);
+ assert.deepEqual(testGiftGrantHistory()[0].reason,'Continue testing gifts');
+ for(let n=0;n<9;n++)grantTestCredits(actor,sender.id,10000,'Test capacity');
+ assert.throws(()=>grantTestCredits(actor,sender.id,10000,'Over cap'),/Wallet limit/);
+ assert.equal(testGiftGrantHistory().length,10);
 });
 test.after(()=>rmSync(directory,{recursive:true,force:true}));

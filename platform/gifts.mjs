@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS test_gift_transfers (
 CREATE INDEX IF NOT EXISTS test_gift_sender_date ON test_gift_transfers(sender_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS test_gift_recipient_date ON test_gift_transfers(recipient_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS test_gift_catalog (gift_id TEXT PRIMARY KEY, points INTEGER NOT NULL CHECK(points BETWEEN 1 AND 250), enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));
-CREATE TABLE IF NOT EXISTS test_gift_catalog_audit (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, gift_id TEXT NOT NULL, points INTEGER NOT NULL, enabled INTEGER NOT NULL, changed_at INTEGER NOT NULL);`);
+CREATE TABLE IF NOT EXISTS test_gift_catalog_audit (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, gift_id TEXT NOT NULL, points INTEGER NOT NULL, enabled INTEGER NOT NULL, changed_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS test_gift_grants (id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, user_id TEXT NOT NULL, points INTEGER NOT NULL CHECK(points BETWEEN 1 AND 10000), reason TEXT NOT NULL, created_at INTEGER NOT NULL);`);
 
 export const TEST_GIFTS=Object.freeze([
  {id:'heart',name:'Heart',icon:'♥',points:5,codepoint:'2764_fe0f'},
@@ -83,8 +84,21 @@ export function updateGiftCatalog(actor,id,points,enabled){
  }catch(e){db.exec('ROLLBACK');throw e;}
 }
 export const giftCatalogAudit=()=>db.prepare('SELECT actor_id AS actorId,gift_id AS giftId,points,enabled,changed_at AS changedAt FROM test_gift_catalog_audit ORDER BY changed_at DESC LIMIT 30').all();
+export const testGiftGrantHistory=()=>db.prepare('SELECT id,actor_id AS actorId,user_id AS userId,points,reason,created_at AS createdAt FROM test_gift_grants ORDER BY created_at DESC,rowid DESC LIMIT 50').all();
 const ensureWallet=id=>db.prepare('INSERT OR IGNORE INTO test_gift_wallets(user_id,balance) VALUES(?,250)').run(id);
 const readWallet=id=>db.prepare('SELECT balance,sent_points AS sentPoints,received_points AS receivedPoints FROM test_gift_wallets WHERE user_id=?').get(id);
+export function grantTestCredits(actor,userId,points,reason){
+ if(typeof userId!=='string'||!/^[0-9a-f-]{16,64}$/.test(userId))throw Error('Choose an account');
+ if(!Number.isInteger(points)||points<1||points>10000)throw Error('Grant 1 to 10,000 test credits');
+ if(typeof reason!=='string'||!reason.trim()||reason.trim().length>200)throw Error('Add a reason under 200 characters');
+ db.exec('BEGIN IMMEDIATE');try{
+  ensureWallet(userId);
+  const updated=db.prepare('UPDATE test_gift_wallets SET balance=balance+? WHERE user_id=? AND balance+?<=100000').run(points,userId,points);
+  if(!updated.changes)throw Error('Wallet limit is 100,000 test credits');
+  db.prepare('INSERT INTO test_gift_grants VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),actor.id,userId,points,reason.trim(),Date.now());
+  const balance=readWallet(userId).balance;db.exec('COMMIT');return {balance,testOnly:true};
+ }catch(error){db.exec('ROLLBACK');throw error;}
+}
 const entry=row=>({...row,gift:giftById(row.giftId)?.name || row.giftId,icon:giftById(row.giftId)?.icon || '✦',codepoint:giftById(row.giftId)?.codepoint || null,scene:giftById(row.giftId)?.scene || null,atlas:giftById(row.giftId)?.atlas || null,flag:giftById(row.giftId)?.flag || null});
 export function testGiftWallet(user){
  ensureWallet(user.id);
