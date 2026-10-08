@@ -2,8 +2,9 @@
 
 Local checks passed on the `figgy-inspired` worktree:
 
-- `npm test`: 43 tests covering account and OAuth boundaries, tester/host gates, profiles, follows, Moment replies and deletion, messages, gifts, rankings, guest invitation, audience-only battle scoring and saved history, guest activity hours, room membership, moderation, and private call authorization/expiry.
-- `node scripts/profile-social-smoke.mjs`: two mobile accounts posting a photo Moment, liking and replying, following, notification, profile links and connection lists.
+- `npm test`: 44 tests covering account and OAuth boundaries, tester/host gates, profiles, follows, Moment replies, report deduplication and deletion, messages, gifts, rankings, guest invitation, audience-only battle scoring and saved history, guest activity hours, room membership, moderation, and private call authorization/expiry.
+- `node scripts/profile-social-smoke.mjs`: two mobile accounts posting a photo Moment, liking, replying and reporting, following, notification, profile links and connection lists.
+- `node scripts/admin-smoke.mjs`: mobile and desktop admin sections, tester approval, host trials, profile edit/lock, settings, appeals and moderator review/removal of a reported Moment.
 - `npm run build` and `node scripts/ui-smoke.mjs`: mobile and desktop signup, profile setup/edit, navigation, discovery, and no horizontal overflow.
 - `node scripts/call-ui-smoke.mjs`: two independent mobile browser sessions, host opt-in, viewer invitation, host acceptance, and hangup.
 - `node scripts/pwa-smoke.mjs`: install manifest and icons, public offline fallback when the app server is unavailable, recovery when it returns, and an offline cache containing no private account/API data.

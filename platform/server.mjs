@@ -1,5 +1,5 @@
 import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
-import {publicProfile,people,connections,follow,moments,createMoment,likeMoment,removeMoment,momentComments,addMomentComment,removeMomentComment,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
+import {publicProfile,people,connections,follow,moments,createMoment,likeMoment,removeMoment,momentComments,addMomentComment,removeMomentComment,momentReportTarget,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
 import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours,endGuestHours} from './access.mjs';
 import { createServer } from 'node:http';
@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RoomRegistry } from './rooms.mjs';
 import { createMedia } from './media.mjs';
-import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport } from './safety.mjs';
+import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport, reportMoment, listMomentReports, resolveMomentReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
 import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userById, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
@@ -133,6 +133,10 @@ export function createApp({ media = createMedia() } = {}) {
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
+      if (req.url === '/api/admin/moment-reports' && req.method === 'GET') {
+        if (!hasPermission(sessionUser,'moderation')) { json(res,403,{error:'Moderation access required'}); return; }
+        json(res,200,{reports:listMomentReports(sessionUser)});return;
+      }
       if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/moments','/api/moments/comments','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
         if(url.pathname!=='/api/host/dashboard'){try{assertAccess(sessionUser,req);}catch(e){json(res,403,{error:e.message});return;}}
@@ -213,13 +217,14 @@ export function createApp({ media = createMedia() } = {}) {
           if(req.url==='/api/follow'){if(typeof input.enabled!=='boolean')throw Error('Choose follow or unfollow');json(res,200,{profile:follow(sessionUser,String(input.userId),input.enabled)});}
           else{readNotifications(sessionUser,input.ids);json(res,200,{ok:true});}return;
         }
-        if(['/api/moments/create','/api/moments/like','/api/moments/remove','/api/moments/comment','/api/moments/comment/remove'].includes(req.url)){
+        if(['/api/moments/create','/api/moments/like','/api/moments/remove','/api/moments/comment','/api/moments/comment/remove','/api/moments/report'].includes(req.url)){
           if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
           const input=await jsonBody(req,req.url==='/api/moments/create'?170000:4096);
           if(req.url==='/api/moments/create')json(res,200,{id:createMoment(sessionUser,input)});
           else if(req.url==='/api/moments/like'){if(typeof input.enabled!=='boolean')throw Error('Choose like or unlike');json(res,200,likeMoment(sessionUser,String(input.id),input.enabled));}
           else if(req.url==='/api/moments/comment')json(res,200,{comment:addMomentComment(sessionUser,String(input.id),input.body)});
           else if(req.url==='/api/moments/comment/remove'){removeMomentComment(sessionUser,String(input.id));json(res,200,{ok:true});}
+          else if(req.url==='/api/moments/report'){reportMoment(sessionUser,momentReportTarget(sessionUser,String(input.id)),input.reason,input.details);json(res,200,{ok:true});}
           else{removeMoment(sessionUser,String(input.id));json(res,200,{ok:true});}return;
         }
         if(['/api/host/apply','/api/access/phone','/api/access/appeal','/api/admin/manage'].includes(req.url)){
@@ -251,6 +256,7 @@ export function createApp({ media = createMedia() } = {}) {
             await endRoom(room, 'This room was ended by moderation.'); json(res, 200, { ok: true }); return;
           }
           if (req.url === '/api/admin/review-report') { json(res, 200, { ok: Boolean(resolveReport(user, input.reportId)) }); return; }
+          if (req.url === '/api/admin/review-moment-report') { json(res,200,{ok:Boolean(resolveMomentReport(user,input.reportId))});return; }
           json(res, 404, { error: 'Not found' }); return;
         }
         if (!['/api/register', '/api/login', '/api/account/adult', '/api/account/send-verification', '/api/account/forgot-password', '/api/account/verify', '/api/account/reset-password'].includes(req.url)) { json(res, 404, { error: 'Not found' }); return; }
