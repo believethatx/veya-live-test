@@ -860,3 +860,5 @@ async function loadAdminProgression(selectedId){
  const list=document.createElement('div');list.className='all-badges';for(const b of p.badges){const item=document.createElement('div');item.className='badge-detail';item.append(badgePill(b),textElement('small',b.earned?'Earned'+(b.manual?' · manual':''):b.revoked?'Revoked':`${b.value} / ${b.target}`));list.append(item);}target.append(list);
  const history=document.createElement('details');history.append(textElement('summary','Recent changes'));for(const x of data.audit)history.append(textElement('p',`${new Date(x.changedAt).toLocaleString()} · ${x.action} · ${x.value} · ${x.userId.slice(0,8)}`));target.append(history);
 }
+
+if('serviceWorker' in navigator){const registerWorker=()=>navigator.serviceWorker.register('/sw.js').catch(()=>{});if(document.readyState==='complete')void registerWorker();else window.addEventListener('load',registerWorker,{once:true});}

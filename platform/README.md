@@ -16,6 +16,7 @@ This branch contains the Veya backend and mobile web client. The GitHub Pages si
 - Approved hosts can opt into private test calls. Viewers request a call, the host accepts or declines, and both participants connect camera and microphone through a separate LiveKit room. Call access is gated by tester and host approval, blocking and active-room status. Calls have a 45-second ring timeout and a 30-minute active limit. There is no billing for calls.
 - A live host can invite one other approved host already watching the room onto camera. The guest explicitly accepts, publishes camera/microphone after LiveKit permission changes, and can leave the camera while remaining a viewer. The host can remove the guest camera or remove that account from the room. Guest time counts toward host activity only after the guest camera becomes live.
 - With a guest on camera, the host can start a three-minute battle. Only confirmed test gifts from viewers to the two hosts during that battle add to the score. Finished scores are saved in each host’s hub. The segment ends on timeout or if the guest leaves. There are no cash prizes, conversion, wagers or payouts.
+- Home-screen install metadata and Veya app icons for the mobile web tester. The service worker stores only the public offline page and icon; it never caches API responses, profiles, chats or live media. Offline users see a reconnect screen because lives and messages require a connection.
 
 ## Run
 
@@ -45,7 +46,7 @@ A future native Android client can use `FLAG_SECURE`; a future iOS client can re
 
 `scripts/browser-smoke.mjs` exercises broadcasts, a guest host, test gift battle and private calls against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). `bash scripts/media-ci.sh` downloads the pinned server, verifies its checksum and runs that check. It does not record media or screenshot live streams. See `VALIDATION.md` for the exact tested scope.
 
-This is a working tester, not a finished public app. Remaining: physical-device and carrier-network verification; provider setup for Facebook and general email delivery; native iOS/Android distribution and capture protections; real payments, coin purchases, settlement and payouts; durable multi-instance presence and call recovery; production abuse controls and operational backups. Gifts and calls use test-only credits or no billing. There is no simulated money or fake live activity.
+This is a working tester, not a finished public app. A home-screen web install is not a native iOS/Android binary. Remaining: physical-device and carrier-network verification; provider setup for Facebook and general email delivery; native distribution and capture protections; real payments, coin purchases, settlement and payouts; durable multi-instance presence and call recovery; production abuse controls and operational backups. Gifts and calls use test-only credits or no billing. There is no simulated money or fake live activity.
 
 ## Account provider setup (Veya only)
 
