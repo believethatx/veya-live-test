@@ -15,10 +15,12 @@ import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAcc
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog} from './gifts.mjs';
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
 import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
+import {CallRegistry} from './calls.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
   const rooms = new RoomRegistry();
+  const calls = new CallRegistry(media,id=>[...rooms.peers.keys()].some(s=>s.user.id===id));
   const attempts = new Map();
   const oauth = createOAuthFlow();
   const emailRequests = new Map();
@@ -32,7 +34,7 @@ export function createApp({ media = createMedia() } = {}) {
     const token=issueAccountToken(email,purpose);
     if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
   }
-  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/gift-extras.css':['gift-extras.css','text/css; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['veya-scenes','veya-sparkle','veya-premium'].map(id=>[`/gifts/${id}.webp`,[`gifts/${id}.webp`,'image/webp']])), ...Object.fromEntries(['sa','ae','kw','qa','eg','ps','iq','lb'].map(id=>[`/gifts/flags/${id}.svg`,[`gifts/flags/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
+  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/discover.css':['discover.css','text/css; charset=utf-8'], '/calls.css':['calls.css','text/css; charset=utf-8'], '/gift-extras.css':['gift-extras.css','text/css; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['veya-scenes','veya-sparkle','veya-premium'].map(id=>[`/gifts/${id}.webp`,[`gifts/${id}.webp`,'image/webp']])), ...Object.fromEntries(['sa','ae','kw','qa','eg','ps','iq','lb'].map(id=>[`/gifts/flags/${id}.svg`,[`gifts/flags/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
@@ -132,7 +134,7 @@ export function createApp({ media = createMedia() } = {}) {
       if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/moments','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
         if(url.pathname!=='/api/host/dashboard'){try{assertAccess(sessionUser,req);}catch(e){json(res,403,{error:e.message});return;}}
-        if(url.pathname==='/api/people')json(res,200,{people:people(sessionUser,{following:url.searchParams.get('following')==='1',search:url.searchParams.get('q') || '',hostsOnly:url.searchParams.get('hosts')==='1'})});
+        if(url.pathname==='/api/people')json(res,200,{people:people(sessionUser,{following:url.searchParams.get('following')==='1',search:url.searchParams.get('q') || '',hostsOnly:url.searchParams.get('hosts')==='1'}).map(p=>({...p,callStatus:p.isHost?calls.status(p.id):null}))});
         else if(url.pathname==='/api/public-profile')json(res,200,{profile:publicProfile(sessionUser,url.searchParams.get('id'))});
         else if(url.pathname==='/api/connections')json(res,200,connections(sessionUser,url.searchParams.get('id'),url.searchParams.get('kind'),Number(url.searchParams.get('offset') || 0)));
         else if(url.pathname==='/api/moments')json(res,200,{moments:moments(sessionUser,url.searchParams.get('id'))});
@@ -140,6 +142,9 @@ export function createApp({ media = createMedia() } = {}) {
         else json(res,200,hostDashboard(sessionUser,req));return;
       }
       if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
+      if(req.url==='/api/calls/state' && req.method==='GET'){
+        if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);json(res,200,await calls.state(sessionUser));return;
+      }
       if(req.method==='GET' && ['/api/conversations','/api/messages'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
         json(res,200,url.pathname==='/api/conversations'?{conversations:conversations(sessionUser)}:conversation(sessionUser,url.searchParams.get('userId')));return;
@@ -150,16 +155,19 @@ export function createApp({ media = createMedia() } = {}) {
         try {
           const event = await media.webhook(await body(req, 65536), req.headers.authorization);
           const room = rooms.rooms.get(event.room?.name);
+          const call=calls.getByRoom(event.room?.name);
           if (event.event === 'participant_joined') {
             const peer = room && rooms.participants(room).find(s => s.user.id === event.participant?.identity);
-            if (!room) await media.end({ id: event.room?.name });
-            else if (!peer || room.blocked.has(event.participant?.identity)) await media.remove(room, event.participant.identity);
+            if (!room && (!call||call.status!=='active'||![call.callerId,call.hostId].includes(event.participant?.identity))) await media.end({ id: event.room?.name });
+            else if (room && (!peer || room.blocked.has(event.participant?.identity))) await media.remove(room, event.participant.identity);
           }
+          if (event.event === 'participant_left' && call) await calls.finish(call);
           if (event.event === 'participant_left' && room) {
             const peer = rooms.participants(room).find(s => s.user.id === event.participant?.identity);
             if (peer) { send(peer, { type: 'ended', message: 'The live connection ended.' }); peer.close(1000, 'Media disconnected'); }
           }
           if (event.event === 'room_finished' && room) await endRoom(room, 'The live connection ended.');
+          if (event.event === 'room_finished' && call) await calls.finish(call);
           json(res, 200, { ok: true });
         } catch { json(res, 401, { error: 'Invalid media webhook' }); }
         return;
@@ -175,6 +183,15 @@ export function createApp({ media = createMedia() } = {}) {
           if(!hasPermission(sessionUser,'progression')){json(res,403,{error:'Progression management access required'});return;}
           json(res,200,{progression:updateProgression(sessionUser,await jsonBody(req))});return;
         }
+        if(['/api/calls/presence','/api/calls/invite','/api/calls/respond','/api/calls/end'].includes(req.url)){
+          if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
+          if(!sessionUser.adult||(accountConfig().email&&!sessionUser.emailVerified))throw Error('Verify your account before using calls');
+          const input=await jsonBody(req);
+          if(req.url==='/api/calls/presence')json(res,200,calls.available(sessionUser,input.available));
+          else if(req.url==='/api/calls/invite')json(res,200,await calls.invite(sessionUser,String(input.hostId||'')));
+          else if(req.url==='/api/calls/respond')json(res,200,await calls.respond(sessionUser,String(input.id||''),input.accept));
+          else json(res,200,await calls.end(sessionUser,String(input.id||'')));return;
+        }
         if(['/api/messages/send','/api/messages/block','/api/messages/remove'].includes(req.url)){
           if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
           const input=await jsonBody(req);const id=String(input.userId||'');
@@ -184,6 +201,7 @@ export function createApp({ media = createMedia() } = {}) {
         }
         if (req.url === '/api/logout') {
           const user = userFromRequest(req); revokeSession(req);
+          if(user)await calls.leaveUser(user.id);
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');
           json(res, 200, { ok: true }, { 'Set-Cookie': expiredCookie }); return;
         }
@@ -202,6 +220,7 @@ export function createApp({ media = createMedia() } = {}) {
         if(['/api/host/apply','/api/access/phone','/api/access/appeal','/api/admin/manage'].includes(req.url)){
           const user=userFromRequest(req);if(!user){json(res,401,{error:'Sign in first'});return;}const input=await jsonBody(req);
           if(req.url==='/api/admin/manage'){if(!isAdmin(user)){json(res,403,{error:'Admin access required'});return;}manage(user,input);
+            if(input.userId && ['tester','host','block'].includes(input.action))await calls.leaveUser(String(input.userId));
             if(input.userId && ['tester','host'].includes(input.action))notify(String(input.userId),'access',input.action==='tester' ? input.approved ? 'Your tester access has been approved.' : 'Your tester access has been removed.' : `Your host status is now ${input.status}.`);
             if(input.action==='appeal'){const appealRow=management(user).appeals.find(a=>a.id===input.appealId);if(appealRow)notify(appealRow.user_id,'appeal','An admin replied to your appeal.');}
             for(const socket of wss.clients){try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');}}

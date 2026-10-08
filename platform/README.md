@@ -1,6 +1,6 @@
-# Veya Live — working room development
+# Veya Live — mobile web tester
 
-This branch contains the application backend and mobile web client. The GitHub Pages site on `main` remains a separate older demonstration; it cannot run this Node backend.
+This branch contains the Veya backend and mobile web client. The GitHub Pages site on `main` is a separate older demonstration; it cannot run this Node backend. The live tester is `https://veya-backend-development.up.railway.app`.
 
 ## Implemented
 
@@ -12,6 +12,8 @@ This branch contains the application backend and mobile web client. The GitHub P
 - Privacy rules before joining/hosting, viewer watermarks and no Veya recording/replay/download/capture functionality.
 - Durable text reports, owner-only report review and ending an active room. Admin authority uses explicitly configured existing user IDs, never an unverified email address.
 - Authenticated LiveKit webhooks to reject participants without active app membership, remove blocked participants and close stale rooms.
+- Original Live / Hosts / People discovery, public profiles, follow lists, Moments, direct messages and a host hub.
+- Approved hosts can opt into private test calls. Viewers request a call, the host accepts or declines, and both participants connect camera and microphone through a separate LiveKit room. Call access is gated by tester and host approval, blocking and active-room status. Calls have a 45-second ring timeout and a 30-minute active limit. There is no billing for calls.
 
 ## Run
 
@@ -25,7 +27,7 @@ Copy `.env.example` to a local environment file and supply it with `node --env-f
 - `ADMIN_USER_IDS`: comma-separated existing owner account IDs, configured by the operator after creating the owner's account. Do not use emails as proof of ownership.
 - In LiveKit configure a webhook to `https://your-app-host/api/livekit/webhook`, signed with the configured API key. This is required for the full removal/room cleanup behavior, especially when self-hosting LiveKit.
 
-Run one app replica; the live room registry is in memory. Redeploying closes active rooms. Capacity is currently 50 viewers per room and is also subject to the LiveKit project quota. Nothing upgrades a paid plan automatically.
+Run one app replica; live rooms, private calls and call availability are in memory. Redeploying closes active rooms and calls and takes hosts offline for calls. Capacity is currently 50 viewers per broadcast room and is also subject to the LiveKit project quota. Nothing upgrades a paid plan automatically.
 
 ## Privacy and capture limits
 
@@ -39,9 +41,9 @@ A future native Android client can use `FLAG_SECURE`; a future iOS client can re
 
 `npm test` verifies real HTTP/WebSocket clients with a fake media adapter, plus signed LiveKit token permissions, room membership, privacy consent, report access, moderation and logout. The fake adapter is test-only and is never selected by environment configuration.
 
-`scripts/browser-smoke.mjs` exercises the complete UI against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). `bash scripts/media-ci.sh` downloads the pinned server, verifies its checksum and runs that check. The full check passed on GitHub Actions, including video to two viewers, chat, reporting, removal and cleanup. It does not record media or screenshot live streams. See `VALIDATION.md` for the exact tested scope.
+`scripts/browser-smoke.mjs` exercises broadcast and private call UI against a real local LiveKit server with synthetic camera/microphone devices (requires Playwright/Chromium). `bash scripts/media-ci.sh` downloads the pinned server, verifies its checksum and runs that check. The check confirms video to two broadcast viewers and both participants in a private call, chat, gifts, reporting, removal and cleanup. It does not record media or screenshot live streams. See `VALIDATION.md` for the exact tested scope.
 
-This is not a finished public social app. Remaining: deployed media/backend connections and cross-network phone verification; email verification/recovery and meaningful age checks; complete profile/follow/discovery features; persistent bans and full moderation workflow; PK/cohosting; gifts/coin ledger, payments and payouts with server-side reconciliation. There is no simulated money or fake live activity in this build.
+This is a working tester, not a finished public app. Remaining: physical-device and carrier-network verification; provider setup for Facebook and general email delivery; native iOS/Android distribution and capture protections; cohosting/PK; real payments, coin purchases, settlement and payouts; durable multi-instance presence and call recovery; production abuse controls and operational backups. Gifts and calls use test-only credits or no billing. There is no simulated money or fake live activity.
 
 ## Account provider setup (Veya only)
 
@@ -61,7 +63,7 @@ Status: automated security and local browser checks cover code behavior. Google 
 
 New and existing accounts without a completed profile enter a two-step setup: display name, optional photo/bio, explicit 18+ acknowledgement when needed, then optional interests. Profiles persist in the existing SQLite volume. Client photos are cropped and re-encoded to 256px JPEG; the API caps the request and permits only raster JPG/PNG data with matching signatures. No SVG or remote photo URL is accepted. Editing is authenticated, origin checked and blocked while that account has a live room.
 
-Explore lists real live rooms with title and host search. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live requires a room title and has its own setup screen. Room privacy, moderation and media permissions are retained.
+Explore separates real live rooms, approved hosts and people, with title, host and country search. Host cards show live state or current call availability only when the host has opted in on an open app session. Empty states contain no fabricated activity. My profile contains editing, account connections and sign-out; Go live requires a room title and has its own setup screen. Room privacy, moderation and media permissions are retained.
 
 Live gifts use an isolated test-credit ledger. Each approved member starts with 250 free test credits and can send one of 25 gifts to another current room participant. Sending requires confirmation; a successful gift briefly animates in the camera view of everyone in the room and appears in room chat. Balance and illustrated history appear in Profile; hosts see test gifts received in their host hub; moderators can inspect the latest transactions. Transfers are atomic and idempotent. Test credits and gifts have no monetary value, purchase flow, conversion or payout. The assets and lightweight player are self-hosted; attribution and licenses are in `GIFT_CREDITS.md` and the gift picker. The original four Veya SVGs and text icons provide fallbacks if animation loading fails.
 

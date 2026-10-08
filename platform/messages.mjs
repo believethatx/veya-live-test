@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS message_blocks (owner_id TEXT NOT NULL,peer_id TEXT N
 CREATE TABLE IF NOT EXISTS message_archives (owner_id TEXT NOT NULL,peer_id TEXT NOT NULL,hidden_at INTEGER NOT NULL,PRIMARY KEY(owner_id,peer_id));`);
 
 const blocked=(a,b)=>Boolean(db.prepare('SELECT 1 FROM message_blocks WHERE (owner_id=? AND peer_id=?) OR (owner_id=? AND peer_id=?)').get(a,b,b,a));
+export const contactBlocked=blocked;
 const archived=(a,b)=>db.prepare('SELECT hidden_at FROM message_archives WHERE owner_id=? AND peer_id=?').get(a,b)?.hidden_at || 0;
 function peer(viewer,id){if(id===viewer.id)throw Error('Choose another person');return publicProfile(viewer,String(id));}
 

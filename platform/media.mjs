@@ -11,8 +11,8 @@ export function createMedia(env = process.env) {
       if (!configured) throw Error('Live video is not connected yet');
       const token = new AccessToken(key, secret, { identity: user.id, name: user.displayName, ttl: 60 });
       token.addGrant({ roomJoin: true, room: room.id, canSubscribe: true,
-        canPublish: role === 'host', canPublishData: false,
-        canPublishSources: role === 'host' ? [TrackSource.CAMERA, TrackSource.MICROPHONE] : [],
+        canPublish: role === 'host' || role === 'call', canPublishData: false,
+        canPublishSources: role === 'host' || role === 'call' ? [TrackSource.CAMERA, TrackSource.MICROPHONE] : [],
         canUpdateOwnMetadata: false, roomRecord: false, roomAdmin: false });
       return { url, token: await token.toJwt() };
     },

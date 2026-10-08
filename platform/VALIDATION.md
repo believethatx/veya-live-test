@@ -1,16 +1,10 @@
-# Validation — 6 October 2026
+# Validation — 8 October 2026
 
-Passed:
-- `npm run build`: bundled the official LiveKit client for self-hosted browser delivery.
-- `npm test`: 7 tests; accounts/sessions, signed media permission grants, multiple viewer membership, consent enforcement, durable reports, access controls, host removal, moderation, logout and room cleanup.
-- `node scripts/ui-smoke.mjs`: real Chromium, 390-pixel mobile and 1280-pixel desktop, registration/login/logout, no horizontal overflow, and honest disabled-streaming state when media is unconfigured.
-- `bash scripts/media-ci.sh` on GitHub Actions: official LiveKit server 1.13.8 with a verified release checksum; synthetic camera/microphone; one real host and two real browser viewers; decoded video frames, live chat, mobile room layout, reports, host removal and room cleanup. No video recording or live screenshots.
-- Full pipeline passed for commit `7292a50b7528362aed7c321f826cabebbe010d02`: https://github.com/believethatx/veya-live-test/actions/runs/37524331479
-- The public GitHub Pages URL now serves the development notice rather than simulated live rooms.
+Local checks passed on the `figgy-inspired` worktree:
 
-Not verified:
-- Real phones and cross-network connections. The full media test passed on GitHub’s runner; the local execution environment cannot start LiveKit because it disallows a required network interface operation. The passing test uses browser clients on one runner, not two physical phones or mobile carrier networks.
-- Public app hosting, persistent-volume backups and LiveKit Cloud configuration. No Veya backend host or LiveKit project is connected. No spending or provider upgrade has been initiated.
-- Native device screenshot/recording prevention. This is a browser client and cannot provide that protection.
+- `npm test`: 38 tests covering account and OAuth boundaries, tester/host gates, profiles, follows, messages, gifts, rankings, room membership, moderation, and private call authorization/expiry.
+- `npm run build` and `node scripts/ui-smoke.mjs`: mobile and desktop signup, profile setup/edit, navigation, discovery, and no horizontal overflow.
+- `node scripts/call-ui-smoke.mjs`: two independent mobile browser sessions, host opt-in, viewer invitation, host acceptance, and hangup.
+- `bash scripts/media-ci.sh`: official pinned LiveKit server 1.13.8, checksum verified, synthetic camera/microphone, host broadcasting to two viewers, room chat/gifts/moderation, then a separate private call with decoded remote video on **both** sides. No live screenshots or recording were made.
 
-A scoped fake media adapter is used only by backend automated tests. It does not prove streaming works. The browser UI test uses the normal application with unconfigured media and verifies that no fake live content appears.
+Still requires real-world verification: two physical phones on different networks, camera/microphone permission behavior on iOS and Android browsers, LiveKit Cloud quotas, and long-running service resilience. The private call registry and host availability are in memory; a restart ends calls and takes hosts offline. This is a test-credit build without purchase, settlement, or payout functions. Browser software cannot guarantee prevention of device screenshots or external recording.

@@ -34,4 +34,4 @@ done
 export LIVEKIT_URL=ws://127.0.0.1:7880
 export LIVEKIT_API_KEY=devkey
 export LIVEKIT_API_SECRET=secret
-node scripts/browser-smoke.mjs || { cat "$veya_test_dir/media.log"; exit 1; }
+node scripts/browser-smoke.mjs || { tail -n 40 "$veya_test_dir/media.log"; exit 1; }
