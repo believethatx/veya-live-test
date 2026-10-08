@@ -2,9 +2,9 @@
 
 Local checks passed on the `figgy-inspired` worktree:
 
-- `npm test`: 45 tests covering account and OAuth boundaries, tester/host gates, profiles, follows, Moment replies, report deduplication and deletion, messages, gifts and audited test-credit grants, rankings, guest invitation, audience-only battle scoring and saved history, guest activity hours, room membership, moderation, and private call authorization/expiry.
-- `node scripts/profile-social-smoke.mjs`: two mobile accounts posting a photo Moment, liking, replying and reporting, following, notification, profile links and connection lists.
-- `node scripts/admin-smoke.mjs`: mobile and desktop admin sections, tester approval, host trials, profile edit/lock, settings, appeals, gift-credit grants and moderator review/removal of a reported Moment.
+- `npm test`: 46 tests covering account and OAuth boundaries, signed-in password changes and session revocation, tester/host gates, profiles, follows, Moment replies, report deduplication and deletion, direct-message privacy and reporting, gifts and audited test-credit grants, rankings, guest invitation, audience-only battle scoring and saved history, guest activity hours, room membership, moderation, and private call authorization/expiry.
+- `node scripts/profile-social-smoke.mjs`: two mobile accounts posting a photo Moment, liking, replying and reporting, following, direct messaging and reporting one selected message, notifications, profile links, connection lists and password change.
+- `node scripts/admin-smoke.mjs`: mobile and desktop admin sections, tester approval, host trials, profile edit/lock, settings, appeals, gift-credit grants, live room oversight and moderator review of Moment and message reports.
 - `npm run build` and `node scripts/ui-smoke.mjs`: mobile and desktop signup, profile setup/edit, navigation, discovery, and no horizontal overflow.
 - `node scripts/call-ui-smoke.mjs`: two independent mobile browser sessions, host opt-in, viewer invitation, host acceptance, and hangup.
 - `node scripts/pwa-smoke.mjs`: install manifest and icons, public offline fallback when the app server is unavailable, recovery when it returns, and an offline cache containing no private account/API data.

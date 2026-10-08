@@ -50,3 +50,9 @@ export function sendMessage(viewer,id,body){
 }
 export function blockMessages(viewer,id,enabled){peer(viewer,id);if(typeof enabled!=='boolean')throw Error('Choose block or unblock');if(enabled)db.prepare('INSERT OR IGNORE INTO message_blocks VALUES(?,?)').run(viewer.id,id);else db.prepare('DELETE FROM message_blocks WHERE owner_id=? AND peer_id=?').run(viewer.id,id);return {blocked:enabled};}
 export function removeConversation(viewer,id){peer(viewer,id);db.prepare('INSERT INTO message_archives VALUES(?,?,?) ON CONFLICT(owner_id,peer_id) DO UPDATE SET hidden_at=excluded.hidden_at').run(viewer.id,id,Date.now());return {ok:true};}
+export function reportableMessage(viewer,id){
+ if(typeof id!=='string'||!/^[0-9a-f]{32}$/.test(id))throw Error('Message unavailable');
+ const item=db.prepare('SELECT m.id,m.sender_id AS senderId,u.display_name AS senderName,m.body FROM direct_messages m JOIN users u ON u.id=m.sender_id WHERE m.id=? AND m.recipient_id=?').get(id,viewer.id);
+ if(!item)throw Error('You can only report a message sent to you');
+ return item;
+}

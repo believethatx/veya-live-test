@@ -9,12 +9,12 @@ import { dirname, join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RoomRegistry } from './rooms.mjs';
 import { createMedia } from './media.mjs';
-import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport, reportMoment, listMomentReports, resolveMomentReport } from './safety.mjs';
+import { POLICY_VERSION, isAdmin, reportRoom, listReports, resolveReport, reportMoment, listMomentReports, resolveMomentReport, reportMessage, listMessageReports, resolveMessageReport } from './safety.mjs';
 import { accountConfig, createOAuthFlow, sendAccountEmail } from './accounts.mjs';
-import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, register, login, createSession, userById, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
+import { socialAccount, confirmAdult, saveProfile, issueAccountToken, consumeAccountToken, changePassword, register, login, createSession, userById, userFromRequest, revokeSession, sessionCookie, expiredCookie } from './auth.mjs';
 import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,giftCatalogAudit,updateGiftCatalog,grantTestCredits,testGiftGrantHistory} from './gifts.mjs';
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
-import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
+import {conversations,conversation,sendMessage,blockMessages,removeConversation,reportableMessage} from './messages.mjs';
 import {CallRegistry} from './calls.mjs';
 import {recordBattle,ownBattles} from './battles.mjs';
 
@@ -133,9 +133,17 @@ export function createApp({ media = createMedia() } = {}) {
         if (!hasPermission(user,'moderation')) { json(res, 403, { error: 'Moderation access required' }); return; }
         json(res, 200, { reports: listReports(user) }); return;
       }
+      if(req.url==='/api/admin/live-rooms' && req.method==='GET'){
+        if(!hasPermission(sessionUser,'moderation')){json(res,403,{error:'Moderation access required'});return;}
+        json(res,200,{rooms:rooms.list()});return;
+      }
       if (req.url === '/api/admin/moment-reports' && req.method === 'GET') {
         if (!hasPermission(sessionUser,'moderation')) { json(res,403,{error:'Moderation access required'}); return; }
         json(res,200,{reports:listMomentReports(sessionUser)});return;
+      }
+      if(req.url==='/api/admin/message-reports' && req.method==='GET'){
+        if(!hasPermission(sessionUser,'moderation')){json(res,403,{error:'Moderation access required'});return;}
+        json(res,200,{reports:listMessageReports(sessionUser)});return;
       }
       if(req.method==='GET' && ['/api/people','/api/public-profile','/api/connections','/api/moments','/api/moments/comments','/api/notifications','/api/host/dashboard'].includes(url.pathname)){
         if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
@@ -204,11 +212,12 @@ export function createApp({ media = createMedia() } = {}) {
           else if(req.url==='/api/calls/respond')json(res,200,await calls.respond(sessionUser,String(input.id||''),input.accept));
           else json(res,200,await calls.end(sessionUser,String(input.id||'')));return;
         }
-        if(['/api/messages/send','/api/messages/block','/api/messages/remove'].includes(req.url)){
+        if(['/api/messages/send','/api/messages/block','/api/messages/remove','/api/messages/report'].includes(req.url)){
           if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);
           const input=await jsonBody(req);const id=String(input.userId||'');
           if(req.url==='/api/messages/send')json(res,200,{item:sendMessage(sessionUser,id,input.body)});
           else if(req.url==='/api/messages/block')json(res,200,blockMessages(sessionUser,id,input.enabled));
+          else if(req.url==='/api/messages/report'){reportMessage(sessionUser,reportableMessage(sessionUser,String(input.messageId||'')),input.reason,input.details);json(res,200,{ok:true});}
           else json(res,200,removeConversation(sessionUser,id));return;
         }
         if (req.url === '/api/logout') {
@@ -216,6 +225,16 @@ export function createApp({ media = createMedia() } = {}) {
           if(user)await calls.leaveUser(user.id);
           for (const socket of wss.clients) if (socket.user.id === user?.id && !userFromRequest(socket.request)) socket.close(1000, 'Signed out');
           json(res, 200, { ok: true }, { 'Set-Cookie': expiredCookie }); return;
+        }
+        if(req.url==='/api/account/change-password'){
+          if(!sessionUser){json(res,401,{error:'Sign in first'});return;}
+          const key='password:'+sessionUser.id,history=(attempts.get(key)||[]).filter(time=>Date.now()-time<60_000);
+          if(history.length>=5){json(res,429,{error:'Too many attempts. Wait a minute.'});return;}
+          history.push(Date.now());attempts.set(key,history);
+          const input=await jsonBody(req,4096);changePassword(sessionUser.id,input.currentPassword,input.newPassword);
+          await calls.leaveUser(sessionUser.id);
+          for(const socket of wss.clients)if(socket.user.id===sessionUser.id)socket.close(1000,'Password changed');
+          json(res,200,{ok:true},{'Set-Cookie':expiredCookie});return;
         }
         if(['/api/follow','/api/notifications/read'].includes(req.url)){
           if(!sessionUser){json(res,401,{error:'Sign in first'});return;}assertAccess(sessionUser,req);const input=await jsonBody(req);
@@ -262,6 +281,7 @@ export function createApp({ media = createMedia() } = {}) {
           }
           if (req.url === '/api/admin/review-report') { json(res, 200, { ok: Boolean(resolveReport(user, input.reportId)) }); return; }
           if (req.url === '/api/admin/review-moment-report') { json(res,200,{ok:Boolean(resolveMomentReport(user,input.reportId))});return; }
+          if (req.url === '/api/admin/review-message-report') { json(res,200,{ok:Boolean(resolveMessageReport(user,input.reportId))});return; }
           json(res, 404, { error: 'Not found' }); return;
         }
         if (!['/api/register', '/api/login', '/api/account/adult', '/api/account/send-verification', '/api/account/forgot-password', '/api/account/verify', '/api/account/reset-password'].includes(req.url)) { json(res, 404, { error: 'Not found' }); return; }

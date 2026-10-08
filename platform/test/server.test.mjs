@@ -33,6 +33,7 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   assert.equal((await request('/api/rooms')).status, 401);
   const owner = await account('Owner'), a = await account('ViewerA'), b = await account('ViewerB');
   assert.equal((await request('/api/admin/reports', a.cookie)).status, 403);
+  assert.equal((await request('/api/admin/live-rooms', a.cookie)).status, 403);
   process.env.ADMIN_USER_IDS = owner.user.id;manage(owner.user,{action:'tester',userId:a.user.id,approved:true});manage(owner.user,{action:'tester',userId:b.user.id,approved:true});
   const host = await connect(owner);
   assert.match((await exchange(host, { type: 'create', title: 'A real live room' }, 'error')).message, /Accept/);
@@ -46,6 +47,8 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   const viewerA = await connect(a), viewerB = await connect(b);
   await exchange(viewerA, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerA, { type: 'ready' }, 'ready');
   await exchange(viewerB, { type: 'join', roomId: room.id, ...consent }, 'joined'); await exchange(viewerB, { type: 'ready' }, 'ready');
+  const liveOversight=await (await request('/api/admin/live-rooms',owner.cookie)).json();
+  assert.equal(liveOversight.rooms[0].id,room.id);assert.equal(liveOversight.rooms[0].viewers,2);
   assert.equal((await (await request('/api/gifts/wallet',a.cookie)).json()).wallet.balance,250);
   assert.equal((await request('/api/gifts/wallet')).status,401);
   assert.equal((await request('/api/admin/test-gifts',a.cookie)).status,403);
@@ -76,6 +79,7 @@ test('real HTTP/WS clients: consent, multiple viewers, reporting, moderation, lo
   assert.ok(removed.includes(a.user.id));
   const final = next(viewerB, 'ended'); const response = await request('/api/admin/end-room', owner.cookie, { roomId: room.id }); assert.equal(response.status, 200); await final;
   assert.equal((await (await request('/api/rooms', b.cookie)).json()).rooms.length, 0); assert.ok(ended.includes(room.id));
+  assert.equal((await (await request('/api/admin/live-rooms',owner.cookie)).json()).rooms.length,0);
   assert.equal((await request('/api/admin/review-report', owner.cookie, { reportId: report.id })).status, 200);
   assert.equal((await (await request('/api/admin/reports', owner.cookie)).json()).reports[0].status, 'reviewed');
   const loggedOut = await connect(b); const closed = new Promise(resolve => loggedOut.once('close', resolve));

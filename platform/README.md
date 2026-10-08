@@ -5,15 +5,18 @@ This branch contains the Veya backend and mobile web client. The GitHub Pages si
 ## Implemented
 
 - SQLite accounts with password hashes, HTTP-only sessions and sign-out that closes the affected room connection.
+- Signed-in email account holders can change their password with the current password; all sessions are revoked and open calls/rooms are closed. The account form rate-limits attempts.
 - LiveKit host video/audio and multiple viewers. Viewer tokens cannot publish camera, microphone, screen share or data. Host tokens only publish camera and microphone.
 - Discovery only after the server verifies the host's camera track with LiveKit. Viewer counts only include clients whose LiveKit connection has been verified.
 - Live chat with server-derived display names, message limits and safe text rendering.
 - Invite links, microphone toggle, mobile sound-unlock control and host viewer removal.
 - Privacy rules before joining/hosting, viewer watermarks and no Veya recording/replay/download/capture functionality.
 - Durable text reports, owner-only report review and ending an active room. Admin authority uses explicitly configured existing user IDs, never an unverified email address.
+- Moderators can see every currently live room and end a broadcast directly from the Reports section, even before a viewer files a report.
 - Authenticated LiveKit webhooks to reject participants without active app membership, remove blocked participants and close stale rooms.
 - Original Live / Hosts / People discovery, public profiles, follow lists, Moments, direct messages and a host hub.
 - Moment replies with a per-account posting limit, author/owner removal and profile-admin removal. Removing a Moment also removes its replies. Viewers can report a Moment; moderators review a private, deduplicated report and can remove the content. Report evidence stays after removal.
+- Recipients can report a specific abusive direct message. Only that selected message and the reporter's explanation enter the moderation queue; other private messages are not exposed to admins.
 - Approved hosts can opt into private test calls. Viewers request a call, the host accepts or declines, and both participants connect camera and microphone through a separate LiveKit room. Call access is gated by tester and host approval, blocking and active-room status. Calls have a 45-second ring timeout and a 30-minute active limit. There is no billing for calls.
 - A live host can invite one other approved host already watching the room onto camera. The guest explicitly accepts, publishes camera/microphone after LiveKit permission changes, and can leave the camera while remaining a viewer. The host can remove the guest camera or remove that account from the room. Guest time counts toward host activity only after the guest camera becomes live.
 - With a guest on camera, the host can start a three-minute battle. Only confirmed test gifts from viewers to the two hosts during that battle add to the score. Finished scores are saved in each host’s hub. The segment ends on timeout or if the guest leaves. There are no cash prizes, conversion, wagers or payouts.

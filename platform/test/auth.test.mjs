@@ -17,5 +17,14 @@ test('account login, session expiry on logout, and duplicate email', () => {
   assert.equal(auth.userFromRequest(request).id, user.id);
   auth.revokeSession(request);
   assert.equal(auth.userFromRequest(request), null);
+  const first=auth.createSession(user.id),second=auth.createSession(user.id);
+  assert.throws(()=>auth.changePassword(user.id,'wrong password','a new long password'),/Current password/);
+  assert.ok(auth.userFromRequest({headers:{cookie:`veya_session=${first}`}}));
+  assert.throws(()=>auth.changePassword(user.id,'long private password','long private password'),/different/);
+  auth.changePassword(user.id,'long private password','a new long password');
+  assert.equal(auth.userFromRequest({headers:{cookie:`veya_session=${first}`}}),null);
+  assert.equal(auth.userFromRequest({headers:{cookie:`veya_session=${second}`}}),null);
+  assert.throws(()=>auth.login({email:'someone@example.com',password:'long private password'}),/Incorrect/);
+  assert.equal(auth.login({email:'someone@example.com',password:'a new long password'}).id,user.id);
   rmSync(directory, { recursive: true, force: true });
 });

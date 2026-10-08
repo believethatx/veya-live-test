@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS moment_reports (
   owner_id TEXT NOT NULL, owner_name TEXT NOT NULL, excerpt TEXT NOT NULL,
   reason TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open', UNIQUE(reporter_id,moment_id)
+);
+CREATE TABLE IF NOT EXISTS message_reports (
+  id TEXT PRIMARY KEY, reporter_id TEXT NOT NULL, message_id TEXT NOT NULL,
+  sender_id TEXT NOT NULL, sender_name TEXT NOT NULL, body TEXT NOT NULL,
+  reason TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open', UNIQUE(reporter_id,message_id)
 );`);
 export const isAdmin = user => permissionsFor(user).length > 0;
 export function reportRoom(user, room, reason, details) {
@@ -44,3 +50,11 @@ export function reportMoment(user,target,reason,details){
 }
 export function listMomentReports(user){if(!hasPermission(user,'moderation'))throw Error('Moderation access required');return db.prepare('SELECT * FROM moment_reports ORDER BY created_at DESC LIMIT 200').all();}
 export function resolveMomentReport(user,id){if(!hasPermission(user,'moderation'))throw Error('Moderation access required');return db.prepare("UPDATE moment_reports SET status='reviewed' WHERE id=?").run(String(id)).changes;}
+export function reportMessage(user,target,reason,details){
+  if(!reasons.has(reason))throw Error('Choose a report reason');
+  if(typeof details!=='string'||details.length>1000)throw Error('Report details are too long');
+  const result=db.prepare('INSERT OR IGNORE INTO message_reports (id,reporter_id,message_id,sender_id,sender_name,body,reason,details,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),user.id,target.id,target.senderId,target.senderName,target.body,reason,details.trim(),new Date().toISOString());
+  if(!result.changes)throw Error('You already reported this message');
+}
+export function listMessageReports(user){if(!hasPermission(user,'moderation'))throw Error('Moderation access required');return db.prepare('SELECT * FROM message_reports ORDER BY created_at DESC LIMIT 200').all();}
+export function resolveMessageReport(user,id){if(!hasPermission(user,'moderation'))throw Error('Moderation access required');return db.prepare("UPDATE message_reports SET status='reviewed' WHERE id=?").run(String(id)).changes;}

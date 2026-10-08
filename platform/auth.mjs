@@ -59,6 +59,21 @@ export function login(input) {
   if (!row || !timingSafeEqual(actual, expected)) throw Error('Incorrect email or password');
   return publicUser(row);
 }
+export function changePassword(userId,currentPassword,newPassword){
+  if(typeof currentPassword!=='string'||typeof newPassword!=='string'||newPassword.length<12||newPassword.length>128)throw Error('Use a new password of 12 to 128 characters');
+  const row=db.prepare('SELECT salt,password_hash FROM users WHERE id=?').get(userId);
+  if(!row)throw Error('Sign in first');
+  const actual=scryptSync(currentPassword,row.salt,64),expected=Buffer.from(row.password_hash,'hex');
+  if(!timingSafeEqual(actual,expected))throw Error('Current password is incorrect');
+  if(currentPassword===newPassword)throw Error('Choose a different password');
+  const salt=randomBytes(16).toString('hex');
+  db.exec('BEGIN IMMEDIATE');try{
+    db.prepare('UPDATE users SET salt=?,password_hash=? WHERE id=?').run(salt,scryptSync(newPassword,salt,64).toString('hex'),userId);
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId);
+    db.prepare('DELETE FROM account_tokens WHERE user_id=? AND purpose=?').run(userId,'reset');
+    db.exec('COMMIT');
+  }catch(e){db.exec('ROLLBACK');throw e;}
+}
 export function createSession(userId) {
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,?,?)')

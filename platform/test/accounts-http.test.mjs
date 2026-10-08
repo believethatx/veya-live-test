@@ -32,5 +32,14 @@ test('email APIs enforce origin, deliver verification once, hide unknown account
     const auth=await import('../auth.mjs');const reset=auth.issueAccountToken('member@example.test','reset');
     assert.equal((await post('/api/account/reset-password',{token:reset,password:'replacement password long enough'})).status,200);
     assert.equal((await (await realFetch(base+'/api/me',{headers:{Cookie:cookie}})).json()).user,null);
+    const signedIn=await post('/api/login',{email:'member@example.test',password:'replacement password long enough'});
+    const signedCookie=signedIn.headers.get('set-cookie').split(';')[0];
+    assert.equal((await post('/api/account/change-password',{currentPassword:'replacement password long enough',newPassword:'another long password'},signedCookie,'https://other.example')).status,403);
+    assert.equal((await post('/api/account/change-password',{currentPassword:'wrong',newPassword:'another long password'},signedCookie)).status,400);
+    const changed=await post('/api/account/change-password',{currentPassword:'replacement password long enough',newPassword:'another long password'},signedCookie);
+    assert.equal(changed.status,200);assert.match(changed.headers.get('set-cookie'),/Max-Age=0/);
+    assert.equal((await (await realFetch(base+'/api/me',{headers:{Cookie:signedCookie}})).json()).user,null);
+    assert.throws(()=>auth.login({email:'member@example.test',password:'replacement password long enough'}),/Incorrect/);
+    assert.equal(auth.login({email:'member@example.test',password:'another long password'}).email,'member@example.test');
   }finally{globalThis.fetch=realFetch;await new Promise(r=>server.close(r));delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;}
 });
