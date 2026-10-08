@@ -1,7 +1,7 @@
 import {HOBBIES,MAX_HOBBIES} from './hobbies.mjs';
 import {publicProfile,people,connections,follow,moments,createMoment,likeMoment,removeMoment,notify,notifyLive,notifications,readNotifications,hostDashboard} from './community.mjs';
 import {COUNTRIES} from './countries.mjs';
-import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours} from './access.mjs';
+import {adminProfile,accessFor,assertAccess,clientIP,rememberConnection,management,manage,applyHost,savePhone,appeal,ownAppeals,hasPermission,expireTrials,startHours,touchHours,endHours,endGuestHours} from './access.mjs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import {TEST_GIFTS,testGiftWallet,sendTestGift,testGiftAdminHistory,giftCatalog,
 import {progression,leaderboard,updateProgression,progressionAudit,progressionUsers,BADGES} from './progression.mjs';
 import {conversations,conversation,sendMessage,blockMessages,removeConversation} from './messages.mjs';
 import {CallRegistry} from './calls.mjs';
+import {recordBattle,ownBattles} from './battles.mjs';
 
 export function createApp({ media = createMedia() } = {}) {
   const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
@@ -34,7 +35,7 @@ export function createApp({ media = createMedia() } = {}) {
     const token=issueAccountToken(email,purpose);
     if(token) await sendAccountEmail(email,purpose,token,origin).catch(()=>console.error('Account email delivery failed'));
   }
-  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/discover.css':['discover.css','text/css; charset=utf-8'], '/calls.css':['calls.css','text/css; charset=utf-8'], '/gift-extras.css':['gift-extras.css','text/css; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['veya-scenes','veya-sparkle','veya-premium'].map(id=>[`/gifts/${id}.webp`,[`gifts/${id}.webp`,'image/webp']])), ...Object.fromEntries(['sa','ae','kw','qa','eg','ps','iq','lb'].map(id=>[`/gifts/flags/${id}.svg`,[`gifts/flags/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
+  const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/discover.css':['discover.css','text/css; charset=utf-8'], '/calls.css':['calls.css','text/css; charset=utf-8'], '/guests.css':['guests.css','text/css; charset=utf-8'], '/gift-extras.css':['gift-extras.css','text/css; charset=utf-8'], '/livekit.js': ['livekit.js', 'text/javascript; charset=utf-8'], '/lottie-light.min.js':['lottie-light.min.js','text/javascript; charset=utf-8'], '/face.js': ['face.js', 'text/javascript; charset=utf-8'], '/face_landmarker.task':['face_landmarker.task','application/octet-stream'], '/face-wasm/vision_wasm_internal.js':['face-wasm/vision_wasm_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_nosimd_internal.js':['face-wasm/vision_wasm_nosimd_internal.js','text/javascript; charset=utf-8'], '/face-wasm/vision_wasm_internal.wasm':['face-wasm/vision_wasm_internal.wasm.gz','application/wasm','gzip'], '/face-wasm/vision_wasm_nosimd_internal.wasm':['face-wasm/vision_wasm_nosimd_internal.wasm.gz','application/wasm','gzip'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], ...Object.fromEntries(['veya-scenes','veya-sparkle','veya-premium'].map(id=>[`/gifts/${id}.webp`,[`gifts/${id}.webp`,'image/webp']])), ...Object.fromEntries(['sa','ae','kw','qa','eg','ps','iq','lb'].map(id=>[`/gifts/flags/${id}.svg`,[`gifts/flags/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(['heart','star','flower','crown'].map(id=>[`/gifts/${id}.svg`,[`gifts/${id}.svg`,'image/svg+xml']])), ...Object.fromEntries(TEST_GIFTS.filter(g=>g.codepoint).flatMap(g=>[[`/gifts/thumbs/${g.codepoint}.svg`,[`gifts/thumbs/${g.codepoint}.svg`,'image/svg+xml']],[`/gifts/animated/${g.codepoint}.json`,[`gifts/animated/${g.codepoint}.json`,'application/json']]])) };
   const send = (socket, value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const secureRequest = req => req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
   const requestOrigin = req => process.env.APP_ORIGIN || `${secureRequest(req) ? 'https' : 'http'}://${req.headers.host}`;
@@ -58,11 +59,12 @@ export function createApp({ media = createMedia() } = {}) {
     res.writeHead(code, { ...securityHeaders, 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(value));
   }
   function roster(room) {
-    const viewers = [...room.viewers].filter(s => rooms.peer(s)?.ready).map(s => ({ id: s.user.id, name: s.user.displayName }));
+    const viewers = [...room.viewers].filter(s => rooms.peer(s)?.ready).map(s => ({ id: s.user.id, name: s.user.displayName,canGuest:accessFor(s.user,s.request).canHost,guest:s===room.guest }));
     send(room.host, { type: 'roster', viewers });
     const participants=[{id:room.host.user.id,name:room.host.user.displayName},...viewers];
-    for (const socket of rooms.participants(room)) {send(socket, { type: 'viewers', count: viewers.length });send(socket,{type:'participants',participants});}
+    for (const socket of rooms.participants(room)) {send(socket, { type: 'viewers', count: viewers.filter(v=>!v.guest).length });send(socket,{type:'participants',participants});send(socket,{type:'guest-state',guest:room.guest?{id:room.guest.user.id,name:room.guest.user.displayName}:null});if(room.battle)send(socket,{type:'battle-state',battle:rooms.battleState(room)});}
   }
+  function battleUpdate(room,state){if(!state)return;if(!state.active)recordBattle(room,state);for(const peer of rooms.participants(room))send(peer,{type:'battle-state',battle:state});}
   async function endRoom(room, message = 'The host ended this room.') {
     endHours(room);rooms.leave(room.host);
     for (const peer of rooms.participants(room)) { send(peer, { type: 'ended', message }); peer.close(1000, 'Room ended'); }
@@ -139,7 +141,7 @@ export function createApp({ media = createMedia() } = {}) {
         else if(url.pathname==='/api/connections')json(res,200,connections(sessionUser,url.searchParams.get('id'),url.searchParams.get('kind'),Number(url.searchParams.get('offset') || 0)));
         else if(url.pathname==='/api/moments')json(res,200,{moments:moments(sessionUser,url.searchParams.get('id'))});
         else if(url.pathname==='/api/notifications')json(res,200,notifications(sessionUser));
-        else json(res,200,hostDashboard(sessionUser,req));return;
+        else json(res,200,{...hostDashboard(sessionUser,req),battles:ownBattles(sessionUser)});return;
       }
       if(req.url==='/api/access' && req.method==='GET'){if(!sessionUser){json(res,401,{error:'Sign in first'});return;}json(res,200,{access:accessFor(sessionUser,req),appeals:ownAppeals(sessionUser)});return;}
       if(req.url==='/api/calls/state' && req.method==='GET'){
@@ -223,7 +225,7 @@ export function createApp({ media = createMedia() } = {}) {
             if(input.userId && ['tester','host','block'].includes(input.action))await calls.leaveUser(String(input.userId));
             if(input.userId && ['tester','host'].includes(input.action))notify(String(input.userId),'access',input.action==='tester' ? input.approved ? 'Your tester access has been approved.' : 'Your tester access has been removed.' : `Your host status is now ${input.status}.`);
             if(input.action==='appeal'){const appealRow=management(user).appeals.find(a=>a.id===input.appealId);if(appealRow)notify(appealRow.user_id,'appeal','An admin replied to your appeal.');}
-            for(const socket of wss.clients){try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');}}
+            for(const socket of wss.clients){try{assertAccess(socket.user,socket.request,['host','cohost'].includes(rooms.peer(socket)?.role));}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');}}
           }else if(req.url==='/api/host/apply'){assertAccess(user,req);applyHost(user,input);}
           else if(req.url==='/api/access/phone'){if(accessFor(user,req).blocked)throw Error('Phone changes are unavailable during a suspension');savePhone(user,input.phone);}
           else appeal(user,input.message);
@@ -302,7 +304,7 @@ export function createApp({ media = createMedia() } = {}) {
         if (socket.readyState !== WebSocket.OPEN) return;
         if (!userFromRequest(socket.request)) { socket.close(1008, 'Sign in again'); return; }
         const msg = JSON.parse(raw);
-        expireTrials();assertAccess(socket.user,socket.request,msg.type==='create' || rooms.peer(socket)?.role==='host');
+        expireTrials();assertAccess(socket.user,socket.request,msg.type==='create' || ['host','cohost'].includes(rooms.peer(socket)?.role));
         if (msg.type === 'create' || msg.type === 'join') {
           if (!media.configured) throw Error('Live video is not connected yet');
           if (msg.policyVersion !== POLICY_VERSION || msg.acceptRules !== true) throw Error('Accept the room privacy rules first');
@@ -328,6 +330,36 @@ export function createApp({ media = createMedia() } = {}) {
           lastChat = Date.now();
           for (const peer of rooms.participants(entry.room)) send(peer, { type: 'chat', userId: socket.user.id, name: socket.user.displayName, text }); return;
         }
+        if(msg.type==='invite-guest'){
+          const target=rooms.inviteGuest(socket,String(msg.userId||''),(user,request)=>accessFor(user,request).canHost);
+          send(target,{type:'guest-invite',hostName:entry.room.hostName,expiresAt:Date.now()+30_000});
+          send(socket,{type:'guest-invite-sent',name:target.user.displayName});return;
+        }
+        if(msg.type==='respond-guest'){
+          if(msg.accept===true){
+            const invite=entry.room.guestInvite;if(!invite||invite.socket!==socket||invite.expires<Date.now()||entry.role!=='viewer')throw Error('Guest invitation has expired');
+            if(!accessFor(socket.user,socket.request).canHost)throw Error('Host approval is required');
+            await media.guestPermission(entry.room,socket.user.id,true);
+          }
+          const result=rooms.acceptGuest(socket,msg.accept);
+          send(socket,{type:result.accepted?'guest-accepted':'guest-declined'});
+          if(!result.accepted)send(result.room.host,{type:'guest-declined',name:socket.user.displayName});
+          roster(result.room);return;
+        }
+        if(msg.type==='guest-ready'){
+          if(entry.role!=='cohost'||entry.room.guest!==socket)throw Error('Guest camera access has ended');
+          await media.verify(entry.room,socket.user,'host');
+          if(!entry.guestReady){entry.guestReady=true;startHours(entry.room,socket.user);}
+          return;
+        }
+        if(msg.type==='remove-guest'||msg.type==='leave-guest'){
+          if(!entry.room.guest||(msg.type==='remove-guest'&&entry.role!=='host')||(msg.type==='leave-guest'&&entry.room.guest!==socket))throw Error('There is no guest to remove');
+          await media.guestPermission(entry.room,entry.room.guest.user.id,false);
+          const guest=rooms.removeGuest(socket);
+          endGuestHours(entry.room,guest.user.id);rooms.peer(guest).guestReady=false;
+          send(guest,{type:'guest-removed'});battleUpdate(entry.room,rooms.finishBattle(entry.room));roster(entry.room);return;
+        }
+        if(msg.type==='start-battle'){battleUpdate(entry.room,rooms.startBattle(socket));return;}
         if(msg.type==='gift'){
           try{
             if(!entry.ready)throw Error('Connect to the live room first');
@@ -335,14 +367,16 @@ export function createApp({ media = createMedia() } = {}) {
             if(!recipient)throw Error('That person is no longer in this live');
             const result=sendTestGift(socket.user,recipient.user,entry.room.id,msg.giftId,msg.requestId);
             send(socket,{type:'gift-sent',requestId:msg.requestId,balance:result.balance});
-            if(!result.duplicate)for(const peer of rooms.participants(entry.room))send(peer,{type:'gift',...result.event});
+            if(!result.duplicate){for(const peer of rooms.participants(entry.room))send(peer,{type:'gift',...result.event});battleUpdate(entry.room,rooms.scoreGift(entry.room,result.event.senderId,result.event.recipientId,result.event.points));}
           }catch(error){send(socket,{type:'gift-error',requestId:msg.requestId,message:error.message});}
           return;
         }
         if (msg.type === 'kick') {
+          const wasGuest=entry.room.guest?.user.id===String(msg.userId);
           const target = rooms.kick(socket, String(msg.userId));
+          if(wasGuest)endGuestHours(entry.room,target.user.id);
           send(target, { type: 'ended', message: 'The host removed you from this room.' }); target.close(1000, 'Removed by host');
-          roster(entry.room); await media.remove(entry.room, target.user.id); return;
+          roster(entry.room);if(wasGuest){battleUpdate(entry.room,rooms.finishBattle(entry.room));for(const peer of rooms.participants(entry.room))send(peer,{type:'guest-ended'});}await media.remove(entry.room, target.user.id); return;
         }
         if (msg.type === 'report') {
           if (Date.now() - lastReport < 30_000) throw Error('Your report was received. Please wait before sending another.');
@@ -356,14 +390,15 @@ export function createApp({ media = createMedia() } = {}) {
     socket.on('close', () => {
       const entry = rooms.peer(socket); if (!entry) return;
       if (entry.role === 'host') void endRoom(entry.room);
-      else { rooms.leave(socket); roster(entry.room); void media.remove(entry.room, socket.user.id).catch(() => console.error('Media participant cleanup failed')); }
+      else { const wasGuest=entry.role==='cohost';if(wasGuest)endGuestHours(entry.room,socket.user.id);rooms.leave(socket); roster(entry.room);if(wasGuest){battleUpdate(entry.room,rooms.finishBattle(entry.room));for(const peer of rooms.participants(entry.room))send(peer,{type:'guest-ended'});}void media.remove(entry.room, socket.user.id).catch(() => console.error('Media participant cleanup failed')); }
     });
     socket.on('error', () => socket.terminate());
   });
   const heartbeat = setInterval(() => {
     expireTrials();
+    for(const room of rooms.rooms.values())if(room.battle && room.battle.endsAt<=Date.now())battleUpdate(room,rooms.finishBattle(room));
     for (const socket of wss.clients) {
-      try{assertAccess(socket.user,socket.request,rooms.peer(socket)?.role==='host');}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');continue;}
+      try{assertAccess(socket.user,socket.request,['host','cohost'].includes(rooms.peer(socket)?.role));}catch(e){send(socket,{type:'ended',message:e.message});socket.close(1008,'Access changed');continue;}
       if(rooms.peer(socket)?.role==='host')touchHours(rooms.peer(socket).room);
       if (!socket.alive || !userFromRequest(socket.request)) { socket.terminate(); continue; }
       socket.alive = false; socket.ping();

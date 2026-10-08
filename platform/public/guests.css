@@ -1,0 +1,13 @@
+#room .guest-tile{position:absolute;z-index:2;top:25%;right:13px;width:clamp(106px,27%,190px);aspect-ratio:3/4;border-radius:17px;overflow:hidden;background:#171629;border:2px solid #c0a0ed;box-shadow:0 14px 34px #03010b99}
+#room .guest-tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#room .guest-tile span{position:absolute;left:6px;bottom:6px;max-width:calc(100% - 12px);padding:3px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:8px;background:#100d1bba;color:#fff;font-size:11px;font-weight:700}
+#room .viewer-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+#room .viewer-actions .btn{font-size:11px;min-height:36px}
+#room .viewer{align-items:flex-start}
+#guestInviteDialog p{line-height:1.45}
+@media(max-width:480px){#room .guest-tile{top:27%;right:10px;width:30%;border-radius:13px}#room .viewer-actions .btn{font-size:10px;padding:5px 7px}}
+#room .battle-board{position:absolute;z-index:3;top:max(135px,calc(env(safe-area-inset-top) + 112px));left:12px;right:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border:1px solid #d4afeb88;border-radius:14px;background:#171229c9;color:#fff;backdrop-filter:blur(12px)}
+#room .battle-board .battle-tag{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#e2b8f7;white-space:nowrap}
+#room .battle-board strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+#room .battle-board span:last-child{font-size:10px;white-space:nowrap}
+@media(max-width:480px){#room .battle-board{top:max(112px,calc(env(safe-area-inset-top) + 100px));left:10px;right:10px;padding:7px 8px}#room .battle-board .battle-tag{font-size:8px}#room .battle-board strong{font-size:10px}}

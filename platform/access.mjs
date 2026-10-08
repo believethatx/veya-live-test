@@ -47,9 +47,10 @@ export function manage(user,input){
  audit(user,action,id || String(input.blockId || input.appealId || 'settings'));
 }
 export function expireTrials(){if(settings().trialOutcome==='continue')db.prepare("UPDATE access_members SET host_status='approved',trial_end=NULL WHERE host_status='trial' AND trial_end<=?").run(Date.now());}
-export function startHours(room,user){const now=Date.now();db.prepare('INSERT OR IGNORE INTO host_sessions VALUES(?,?,?,?,NULL)').run(room.id,user.id,now,now);}
-export function touchHours(room){db.prepare('UPDATE host_sessions SET last_seen=? WHERE room_id=? AND ended_at IS NULL').run(Date.now(),room.id);}
-export function endHours(room){db.prepare('UPDATE host_sessions SET last_seen=?,ended_at=? WHERE room_id=? AND ended_at IS NULL').run(Date.now(),Date.now(),room.id);}
+export function startHours(room,user){const now=Date.now(),id=(!room.hostId||user.id===room.hostId)?room.id:`${room.id}:${user.id}:${now}:${randomBytes(3).toString('hex')}`;db.prepare('INSERT OR IGNORE INTO host_sessions VALUES(?,?,?,?,NULL)').run(id,user.id,now,now);}
+export function touchHours(room){db.prepare('UPDATE host_sessions SET last_seen=? WHERE (room_id=? OR room_id LIKE ?) AND ended_at IS NULL').run(Date.now(),room.id,`${room.id}:%`);}
+export function endGuestHours(room,userId){const now=Date.now();db.prepare('UPDATE host_sessions SET last_seen=?,ended_at=? WHERE room_id LIKE ? AND user_id=? AND ended_at IS NULL').run(now,now,`${room.id}:%`,userId);}
+export function endHours(room){const now=Date.now();db.prepare('UPDATE host_sessions SET last_seen=?,ended_at=? WHERE (room_id=? OR room_id LIKE ?) AND ended_at IS NULL').run(now,now,room.id,`${room.id}:%`);}
 
 export function adminProfile(user,id,input){
  if(!hasPermission(user,'profiles'))throw Error('Profile management permission required');

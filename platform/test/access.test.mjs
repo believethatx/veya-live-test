@@ -33,3 +33,15 @@ test('viewer cannot bypass host approval through direct WebSocket messages',asyn
  try{await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j);});const reply=new Promise((r,j)=>{const timer=setTimeout(()=>j(Error('No rejection')),3000);ws.once('message',m=>{clearTimeout(timer);r(JSON.parse(m));});});ws.send(JSON.stringify({type:'create',title:'Bypass attempt',acceptRules:true,policyVersion:POLICY_VERSION}));assert.match((await reply).message,/host approval/);}
  finally{ws.terminate();await new Promise(r=>server.close(r));}
 });
+test('guest host time is recorded only while their camera segment is active',()=>{
+ const guest=profile(account('GuestHours')),room={id:'guest-hours-room',hostId:owner.id};
+ const original=Date.now,base=original();
+ try{
+  Date.now=()=>base;access.startHours(room,owner);
+  Date.now=()=>base+1000;access.startHours(room,guest);
+  Date.now=()=>base+61000;access.touchHours(room);access.endGuestHours(room,guest.id);
+  Date.now=()=>base+121000;access.endHours(room);
+assert.ok(access.accessFor(guest).liveHours>0);
+  assert.ok(access.accessFor(guest).liveHours<access.accessFor(owner).liveHours);
+ }finally{Date.now=original;}
+});

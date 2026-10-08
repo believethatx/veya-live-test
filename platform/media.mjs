@@ -29,6 +29,10 @@ export function createMedia(env = process.env) {
     },
     async end(room) { if (configured) await client.deleteRoom(room.id); },
     async remove(room, userId) { if (configured) await client.removeParticipant(room.id, userId); },
+    async guestPermission(room,userId,enabled) {
+      if(!configured)throw Error('Live video is not connected yet');
+      await client.updateParticipant(room.id,userId,{permission:{canSubscribe:true,canPublish:enabled,canPublishData:false,canPublishSources:enabled?[TrackSource.CAMERA,TrackSource.MICROPHONE]:[],canUpdateOwnMetadata:false,roomRecord:false,roomAdmin:false}});
+    },
     async webhook(body, authorization) {
       if (!receiver) throw Error('Media is not configured');
       return receiver.receive(body, authorization);

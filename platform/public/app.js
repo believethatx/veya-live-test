@@ -1,7 +1,7 @@
 import { Room, RoomEvent, Track, createLocalTracks } from '/livekit.js';
 const $ = id => document.getElementById(id);
 let socket, liveRoom, localTracks = [], cameraEffect = null, previewEffect = null, previewSwitch=Promise.resolve(), activeRoom, role, currentUser, registering = false, busy = false, pendingRoom;
-let pendingChat = null, chatStatusTimer, roomConfirmAction = null;
+let pendingChat = null, chatStatusTimer, roomConfirmAction = null, guestTracks=[],activeGuest=null,guestPublishing=false,activeBattle=null,battleHideTimer=null;
 let liveParticipants=[],giftPending=null,giftWallet=null,giftCollection='Veya';
 const giftIds=new Set(['heart','star','flower','crown']);
 const sceneGifts=new Set(['snow_leopard','dance_party','football','veya_popper','phoenix','moon_carriage','crystal_rose','golden_butterfly','magic_lantern','treasure_chest','moon_swing','heart_comet','crystal_stag','neon_supercar','sea_dragon','grand_piano','sky_airship','cosmic_whale']);
@@ -213,8 +213,38 @@ function updateWatermark() {
   if (!activeRoom) return;
   $('watermark').textContent = `Veya · ${currentUser.displayName} · ${currentUser.id.slice(0, 8)} · ${new Date().toLocaleTimeString()}`;
 }
+function stopGuestCamera(){for(const track of guestTracks){track.detach();track.stop();}guestTracks=[];guestPublishing=false;$('guestVideo').srcObject=null;$('guestAudio').srcObject=null;$('guestMute').hidden=true;$('leaveGuest').hidden=true;}
+function paintGuestState(guest){
+  if(!guest){activeGuest=null;stopGuestCamera();$('guestTile').hidden=true;$('removeGuest').hidden=true;$('startBattle').hidden=true;$('battleHint').hidden=true;return;}
+  activeGuest=guest;$('guestName').textContent=guest.id===currentUser.id?'You · guest':guest.name+' · guest';$('removeGuest').hidden=role!=='host';
+  $('startBattle').hidden=role!=='host'||Boolean(activeBattle?.active);$('battleHint').hidden=role!=='host';
+  if(guest.id===currentUser.id){$('guestVideo').muted=true;$('guestTile').hidden=!guestTracks.length;$('guestMute').hidden=!guestTracks.length;$('leaveGuest').hidden=false;}
+  else {const participant=liveRoom?.remoteParticipants.get(guest.id);for(const pub of participant?.trackPublications.values()||[]){if(!pub.track)continue;if(pub.track.kind===Track.Kind.Video){pub.track.attach($('guestVideo'));$('guestTile').hidden=false;}else if(pub.track.kind===Track.Kind.Audio)pub.track.attach($('guestAudio'));}}
+}
+function paintBattle(battle){clearTimeout(battleHideTimer);activeBattle=battle;if(!battle){$('battleBoard').hidden=true;$('startBattle').hidden=role!=='host'||!activeGuest;return;}
+ $('battleBoard').hidden=false;$('startBattle').hidden=true;$('battleScore').textContent=`${battle.hostName} ${battle.hostPoints} : ${battle.guestPoints} ${battle.guestName}`;
+ if(battle.active){$('battleClock').textContent=`${Math.max(0,Math.ceil((battle.endsAt-Date.now())/1000))}s left`;}else{
+  $('battleClock').textContent=battle.hostPoints===battle.guestPoints?'Draw · test gifts':`${battle.hostPoints>battle.guestPoints?battle.hostName:battle.guestName} wins · test gifts`;
+  battleHideTimer=setTimeout(()=>{activeBattle=null;$('battleBoard').hidden=true;$('startBattle').hidden=role!=='host'||!activeGuest;},6500);
+ }
+}
+setInterval(()=>{if(activeBattle?.active&&!$('battleBoard').hidden)$('battleClock').textContent=`${Math.max(0,Math.ceil((activeBattle.endsAt-Date.now())/1000))}s left`;},1000);
+$('startBattle').onclick=()=>confirmRoomAction('Start a test gift battle?','For three minutes, gifts sent to you or your guest add to your separate scores. No money or prizes are awarded.','Start battle',()=>{send({type:'start-battle'});$('viewersPanel').hidden=true;});
+async function publishGuestCamera(){if(guestPublishing||!liveRoom||!activeRoom)return;guestPublishing=true;try{
+  for(let attempt=0;attempt<30&&!liveRoom.localParticipant.permissions?.canPublish;attempt++)await new Promise(r=>setTimeout(r,100));
+  if(!liveRoom.localParticipant.permissions?.canPublish)throw Error('Camera permission did not become ready');
+  const tracks=await createLocalTracks({audio:true,video:true});guestTracks=tracks;
+  for(const track of tracks)await liveRoom.localParticipant.publishTrack(track,{source:track.kind===Track.Kind.Video?Track.Source.Camera:Track.Source.Microphone});
+  tracks.find(t=>t.kind===Track.Kind.Video)?.attach($('guestVideo'));send({type:'guest-ready'});$('guestTile').hidden=false;$('guestMute').hidden=false;$('leaveGuest').hidden=false;status('You are on camera with the host.');
+ }catch(e){stopGuestCamera();send({type:'leave-guest'});status(e.name==='NotAllowedError'?'Allow camera and microphone to join as a guest.':e.message);}finally{guestPublishing=false;}}
+$('guestDecline').onclick=()=>{$('guestInviteDialog').close();send({type:'respond-guest',accept:false});};
+$('guestAccept').onclick=()=>{$('guestInviteDialog').close();send({type:'respond-guest',accept:true});};
+$('guestMute').onclick=async()=>{const track=guestTracks.find(t=>t.kind===Track.Kind.Audio);if(!track)return;await(track.isMuted?track.unmute():track.mute());$('guestMute').innerHTML=track.isMuted?'◉ <span>Unmute</span>':'◉ <span>Guest mic</span>';};
+$('leaveGuest').onclick=()=>confirmRoomAction('Leave the guest camera?','You will remain in the live as a viewer.','Leave camera',()=>send({type:'leave-guest'}));
+$('removeGuest').onclick=()=>confirmRoomAction('Remove guest camera?','The guest will remain in the live as a viewer.','Remove guest',()=>send({type:'remove-guest'}));
 function showRoom(room) {
   resetGiftCelebration();
+  activeGuest=null;guestTracks=[];guestPublishing=false;activeBattle=null;clearTimeout(battleHideTimer);$('battleBoard').hidden=true;$('startBattle').hidden=true;$('battleHint').hidden=true;$('guestTile').hidden=true;$('guestInviteDialog').close();$('guestMute').hidden=true;$('leaveGuest').hidden=true;$('removeGuest').hidden=true;
   for(const id of ['discover','profile','studio','onboarding','following','updates','messageThread','callScreen','hostHub','rankings','publicProfileDialog'])$(id).hidden=true;$('appNav').hidden=true; $('room').hidden = false; $('roomTitle').textContent = room.title;
   $('local').hidden = role !== 'host'; $('remote').hidden = role === 'host'; $('mute').hidden = role !== 'host';
   $('viewersPanel').hidden = true;$('giftPanel').hidden=true;liveParticipants=[];giftPending=null; $('openViewers').hidden = role !== 'host'; $('leave').setAttribute('aria-label',role === 'host' ? 'End live' : 'Leave live'); $('chatSendStatus').hidden=true; pendingChat=null;
@@ -224,11 +254,17 @@ function showRoom(room) {
 async function attachMedia(credentials, roomInfo) {
   const room = new Room({ adaptiveStream: true, dynacast: true }); liveRoom = room;
   room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-    if (participant.identity !== roomInfo.hostId) return;
+    if (participant.identity!==roomInfo.hostId) {
+      if(participant.identity!==activeGuest?.id)return;
+      if(track.kind===Track.Kind.Video){track.attach($('guestVideo'));$('guestTile').hidden=false;}
+      if(track.kind===Track.Kind.Audio)track.attach($('guestAudio'));
+      return;
+    }
     if (track.kind === Track.Kind.Video) track.attach($('remote'));
     if (track.kind === Track.Kind.Audio) { track.attach($('remoteAudio')); $('hearAudio').hidden = room.canPlaybackAudio; }
   });
   room.on(RoomEvent.AudioPlaybackStatusChanged, () => { $('hearAudio').hidden = role === 'host' || room.canPlaybackAudio; });
+  room.on(RoomEvent.TrackUnsubscribed,track=>track.detach());
   room.on(RoomEvent.Reconnecting, () => status('Reconnecting to the live…'));
   room.on(RoomEvent.Reconnected, () => status(role === 'host' ? 'You’re live' : 'Watching live'));
   room.on(RoomEvent.Disconnected, () => { if (liveRoom === room && activeRoom) { cleanup(); notice('The live connection ended.'); } });
@@ -272,6 +308,13 @@ function connect(firstMessage) {
         if ($('chatLog').children.length > 100) $('chatLog').firstChild.remove(); $('chatLog').scrollTop = $('chatLog').scrollHeight;
       }
       if(msg.type==='participants'){liveParticipants=msg.participants;renderGiftRecipients();}
+      if(msg.type==='guest-invite'){$('guestInviteText').textContent=`${msg.hostName} invited you to join this live on camera.`;$('guestInviteDialog').showModal();}
+      if(msg.type==='guest-invite-sent')status(`Invitation sent to ${msg.name}.`);
+      if(msg.type==='guest-declined')status(`${msg.name||'The host'} declined the invitation.`);
+      if(msg.type==='guest-accepted')void publishGuestCamera();
+      if(msg.type==='guest-state')paintGuestState(msg.guest);
+      if(msg.type==='battle-state')paintBattle(msg.battle);
+      if(msg.type==='guest-removed'||msg.type==='guest-ended'){stopGuestCamera();if(msg.type==='guest-removed')status('You left the guest camera.');}
       if(msg.type==='gift'){
         const item=document.createElement('li');item.className='room-gift';item.append(giftVisual(msg),document.createTextNode(`${msg.senderName} sent ${msg.icon} ${msg.gift} to ${msg.recipientName}`));$('chatLog').append(item);if($('chatLog').children.length>100)$('chatLog').firstChild.remove();$('chatLog').scrollTop=$('chatLog').scrollHeight;queueGiftCelebration(msg);
       }
@@ -283,7 +326,8 @@ function connect(firstMessage) {
         if (!msg.viewers.length) $('viewerList').textContent = 'Waiting for your first viewer.';
         for (const viewer of msg.viewers) {
           const row = document.createElement('div'); row.className = 'viewer'; const name = document.createElement('span'); name.textContent = viewer.name;
-          const button = document.createElement('button'); button.className = 'btn danger'; button.textContent = 'Remove'; button.onclick = () => confirmRoomAction('Remove viewer?', `${viewer.name} will leave this live and its chat.`, 'Remove', () => { send({ type: 'kick', userId: viewer.id }); $('viewersPanel').hidden=true; status(`${viewer.name} removed from this live.`); }); row.append(name, button); $('viewerList').append(row);
+          const actions=document.createElement('div');actions.className='viewer-actions';if(viewer.canGuest&&!viewer.guest&&!msg.viewers.some(v=>v.guest)){const invite=document.createElement('button');invite.className='btn secondary';invite.textContent='Invite on camera';invite.onclick=()=>{send({type:'invite-guest',userId:viewer.id});$('viewersPanel').hidden=true;};actions.append(invite);}
+          const button = document.createElement('button'); button.className = 'btn danger'; button.textContent = 'Remove'; button.onclick = () => confirmRoomAction('Remove viewer?', `${viewer.name} will leave this live and its chat.`, 'Remove', () => { send({ type: 'kick', userId: viewer.id }); $('viewersPanel').hidden=true; status(`${viewer.name} removed from this live.`); }); actions.append(button);row.append(name,actions); $('viewerList').append(row);
         }
       }
       if (msg.type === 'reported') { $('reportDialog').close(); notice('Report received. Thank you for helping keep Veya safe.'); }
@@ -295,6 +339,8 @@ function connect(firstMessage) {
 }
 function cleanup() {
   resetGiftCelebration();
+  stopGuestCamera();activeGuest=null;$('guestTile').hidden=true;$('guestInviteDialog').close();
+  activeBattle=null;clearTimeout(battleHideTimer);$('battleBoard').hidden=true;
   stopPreview();stopCameraEffect();activeRoom = null; const room = liveRoom; liveRoom = null; void room?.disconnect();
   for (const track of localTracks) { track.detach(); track.stop(); } localTracks = [];
   const ws = socket; socket = null; ws?.close();
@@ -535,7 +581,7 @@ function countryPlace(code){const place=document.createElement('small');place.cl
 function selectExplore(view){exploreView=view;for(const name of ['live','hosts','people']){$(name==='live'?'liveExplore':name==='hosts'?'hostExplore':'peopleExplore').hidden=view!==name;const tab=$('exploreSwitch').querySelector(`[data-explore="${name}"]`);tab.setAttribute('aria-selected',String(view===name));}if(!$('discover').hidden)void loadPeople(false);}
 for(const tab of $('exploreSwitch').querySelectorAll('button'))tab.onclick=()=>selectExplore(tab.dataset.explore);
 function renderPeople(following){
- if(following){const target=$('followedHosts');const people=followingPeople.filter(p=>p.id!==currentUser.id);target.replaceChildren();if(!people.length){const empty=textElement('p',connectionKind==='followers'?'No followers yet.':'Not following anyone yet. Find people in Explore.');empty.className='directory-empty';target.append(empty);return;}for(const p of people)target.append(personRow(p,true));return;}
+ if(following){const target=$('followedHosts');const people=followingPeople;target.replaceChildren();if(!people.length){const empty=textElement('p',connectionKind==='followers'?'No followers yet.':'Not following anyone yet. Find people in Explore.');empty.className='directory-empty';target.append(empty);return;}for(const p of people)target.append(personRow(p,true));return;}
  const query=$('roomSearch').value.trim().toLowerCase();
  const matches=directoryPeople.filter(p=>p.id!==currentUser.id && `${p.displayName} ${p.bio} ${(p.hobbies||[]).join(' ')} ${countryLabel(p.country)}`.toLowerCase().includes(query));
  const hosts=matches.filter(p=>p.isHost),hostTarget=$('hostDirectory'),peopleTarget=$('viewerDirectory');hostTarget.replaceChildren();peopleTarget.replaceChildren();
@@ -603,6 +649,7 @@ async function loadHostHub(){try{
  $('hostRequirements').textContent=d.trial.requirements.dailyCap>0?`Qualifying hours are capped at ${d.trial.requirements.dailyCap} per day. Actual time this week: ${n(d.activity.weekHours)} hours. Dates reset at 00:00 UTC.`:'Tracked live time counts toward the weekly hour target. Dates reset at 00:00 UTC.';
  $('hostEarningsMessage').textContent=d.earnings.message;
  $('hostTestGiftTotal').textContent=g.wallet.receivedPoints+' points';const received=g.wallet.recent.filter(x=>x.recipientId===currentUser.id);$('hostTestGiftRecent').textContent=received.length?received.slice(0,3).map(x=>`${x.senderName} sent ${x.gift} (${x.points})`).join(' · '):'Gifts received during test lives appear here.';
+ $('hostBattles').replaceChildren();for(const battle of d.battles||[]){const mine=currentUser.id===battle.hostId?battle.hostPoints:battle.guestPoints,other=currentUser.id===battle.hostId?battle.guestPoints:battle.hostPoints,otherName=currentUser.id===battle.hostId?battle.guestName:battle.hostName;const row=document.createElement('div');row.className='host-session';const copy=document.createElement('div');copy.append(textElement('strong',`${mine>other?'Win':mine<other?'Loss':'Draw'} with ${otherName}`),textElement('span',new Date(battle.endedAt).toLocaleString()));row.append(copy,textElement('span',`${mine}–${other}`));$('hostBattles').append(row);}if(!d.battles?.length)$('hostBattles').append(textElement('p','Your guest battles will appear here after they finish.'));
  $('hostSessions').replaceChildren();for(const session of d.sessions){const row=document.createElement('div');row.className='host-session';const copy=document.createElement('div');copy.append(textElement('strong',new Date(session.startedAt).toLocaleString()),textElement('span',session.endedAt?'Ended':'Active / last connected'));const duration=textElement('span',`${Math.max(0,Math.round((session.lastSeen-session.startedAt)/60000))} min`);row.append(copy,duration);$('hostSessions').append(row);}if(!d.sessions.length){const empty=textElement('p','Your live sessions will appear here after you go live.');empty.className='profile-empty';$('hostSessions').append(empty);}
  }catch(e){notice(e.message);}}
 $('hostHubBack').onclick=()=>navigate('profile');

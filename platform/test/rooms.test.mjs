@@ -19,3 +19,32 @@ test('host removal blocks rejoining, and viewers cannot remove another viewer', 
   assert.throws(() => rooms.join(socket('a'), room.id), /removed/);
   assert.throws(() => rooms.join(socket('b'), room.id), /another tab/);
 });
+test('one approved guest joins by invitation and can return to the audience', () => {
+  const rooms=new RoomRegistry(),host=socket('host'),approved=socket('approved'),viewer=socket('viewer');
+  const room=rooms.create(host,'Guest live');rooms.ready(host);rooms.join(approved,room.id);rooms.join(viewer,room.id);rooms.ready(approved);rooms.ready(viewer);
+  assert.throws(()=>rooms.inviteGuest(viewer,'approved',()=>true),/Only the live host/);
+  assert.throws(()=>rooms.inviteGuest(host,'viewer',()=>false),/approved host/);
+  assert.equal(rooms.inviteGuest(host,'approved',()=>true),approved);
+  assert.throws(()=>rooms.acceptGuest(viewer,true),/expired/);
+  assert.equal(rooms.acceptGuest(approved,true).accepted,true);
+  assert.equal(rooms.peer(approved).role,'cohost');assert.equal(rooms.list()[0].viewers,1);
+  assert.throws(()=>rooms.inviteGuest(host,'viewer',()=>true),/already on camera/);
+  assert.equal(rooms.removeGuest(approved),approved);assert.equal(rooms.peer(approved).role,'viewer');assert.equal(rooms.list()[0].viewers,2);
+  rooms.inviteGuest(host,'approved',()=>true);rooms.acceptGuest(approved,true);rooms.leave(approved);
+  assert.equal(room.guest,null);assert.equal(rooms.list()[0].viewers,1);
+});
+test('gift battle counts only host and guest gifts and ends with the guest segment',()=>{
+  const rooms=new RoomRegistry(),host=socket('host'),guest=socket('guest'),viewer=socket('viewer');
+  const room=rooms.create(host,'Battle');rooms.ready(host);rooms.join(guest,room.id);rooms.join(viewer,room.id);rooms.ready(guest);rooms.ready(viewer);
+  assert.throws(()=>rooms.startBattle(host),/Invite a guest/);
+  rooms.inviteGuest(host,'guest',()=>true);rooms.acceptGuest(guest,true);
+  assert.throws(()=>rooms.startBattle(guest),/Invite a guest/);
+  assert.equal(rooms.startBattle(host).active,true);
+  assert.equal(rooms.scoreGift(room,'viewer','viewer',30),null);
+  assert.equal(rooms.scoreGift(room,'host','guest',15),null);assert.equal(rooms.scoreGift(room,'viewer','guest',15).guestPoints,15);
+  assert.equal(rooms.scoreGift(room,'viewer','host',5).hostPoints,5);
+  assert.throws(()=>rooms.startBattle(host),/already running/);
+  rooms.removeGuest(host);const final=rooms.finishBattle(room);
+  assert.equal(final.active,false);assert.equal(final.guestName,'guest');assert.equal(final.guestPoints,15);
+  assert.equal(rooms.scoreGift(room,'viewer','host',5),null);
+});
